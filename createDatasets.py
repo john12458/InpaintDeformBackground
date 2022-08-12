@@ -8,12 +8,6 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 
-# In[ ]:
-
-
-
-
-
 # # Classes
 
 # In[2]:
@@ -29,7 +23,7 @@ from natsort import natsorted
 import cv2
 
 
-# In[3]:
+# In[22]:
 
 
 #. https://github.com/alyssaq/face_morpher/blob/dlib/facemorpher/warper.py
@@ -298,10 +292,13 @@ class GridTriangularWarp:
         
         # Create Deform Mesh
         # print("mesh",mesh.shape)
+        
         sample_pts_mesh_xy = np.concatenate(
             (
-                np.random.randint( 1,mesh.shape[1]-2, size=(self.num_vertex_wanted_to_move, 1)),
-                np.random.randint( 1,mesh.shape[2]-2, size=(self.num_vertex_wanted_to_move, 1))
+                np.random.randint( 3,mesh.shape[1]-3, size=(self.num_vertex_wanted_to_move, 1)),
+                np.random.randint( 3,mesh.shape[2]-3, size=(self.num_vertex_wanted_to_move, 1))
+                # np.random.randint( 1,mesh.shape[1]-2, size=(self.num_vertex_wanted_to_move, 1)),
+                # np.random.randint( 1,mesh.shape[2]-2, size=(self.num_vertex_wanted_to_move, 1))
             ),axis=1
         )
         
@@ -364,7 +361,7 @@ class GridTriangularWarp:
         return f"{self.__class__.__name__}()"
 
 
-# In[4]:
+# In[23]:
 
 
 def check_create_dir(dir_path):
@@ -372,7 +369,7 @@ def check_create_dir(dir_path):
         os.makedirs(dir_path)
 
 
-# In[5]:
+# In[67]:
 
 
 class CelebADataset(torch.utils.data.Dataset):
@@ -391,7 +388,9 @@ class CelebADataset(torch.utils.data.Dataset):
         image_names = os.listdir(root_dir)
 
         self.root_dir = root_dir
-        self.resize = transforms.Resize(size= image_size)
+        # self.resize = transforms.Resize(size= image_size)
+        self.image_size = image_size
+        self.centerCrop = transforms.CenterCrop(size= image_size)
         self.basic_transform = transforms.Compose(
         [
              transforms.ToTensor(),
@@ -434,23 +433,47 @@ class CelebADataset(torch.utils.data.Dataset):
         img_path = os.path.join(self.root_dir, self.image_names[idx])
         
         # Load image and convert it to RGB
-        img_pillow_origin = Image.open(img_path).convert('RGB')
-        img_pillow = self.resize(img_pillow_origin) 
+        img_pillow_origin = Image.open(img_path).convert('RGB')        
+        if img_pillow_origin.size[0] < self.image_size[0]  and img_pillow_origin.size[1] < self.image_size[1]:
+            origin_size = max(img_pillow_origin.size[0],img_pillow_origin.size[1])
+            scale_factor = min(self.image_size[0],self.image_size[1]) / origin_size
+            scale_size = [ int(img_pillow_origin.size[1] * scale_factor) ,int(img_pillow_origin.size[0] * scale_factor) ]
+            # print("img_pillow_origin.size",img_pillow_origin.size)
+            # print("scale_factor",scale_factor, "scale_size ",scale_size )
+            img_pillow_origin = torchvision.transforms.Resize(size = scale_size)(img_pillow_origin)
+        # plt.imshow(img_pillow_origin)
+        # print("img_pillow_origin",img_pillow_origin.size)
+            
+        img_pillow = img_pillow_origin
         if self.transform:
             img_pillow = self.transfrom(img_pillow)
-        img = self.basic_transform(img_pillow) 
+        
+        img_pillow = self.centerCrop(img_pillow)
+        padding_mask_pillow = self.centerCrop(Image.fromarray(np.ones_like(img_pillow_origin)*255))
+        padding_mask = (np.array(padding_mask_pillow)/255)[...,0][...,np.newaxis]
         
         
             
         if self.return_mesh:
             warpped_img, mesh_no_last_row, mesh_trans_no_last_row,mask = self.warp_f(img_pillow)
+           
+            
+            
             if self.savePath:
+                # img_pillow = self.centerCrop(img_pillow)
                 origin_path = f"{self.origin_dir}/{self.image_names[idx]}"
                 img_pillow.save( origin_path)
                 
+                # warpped_img = self.centerCrop(warpped_img)
                 warpped_path = f"{self.warpped_dir}/{self.image_names[idx]}"
                 warpped_img.save(warpped_path )
                 
+                # mask = (np.array( \
+                #         self.centerCrop( \
+                #             Image.fromarray(np.uint8(mask * 255)[:,:,0]) \
+                #         ) \
+                #     )/255)[...,np.newaxis]
+                mask = mask * padding_mask 
                 mask_path = f"{self.mask_dir}/{self.image_names[idx].split('.')[0]}"
                 np.save(mask_path,mask)
                 
@@ -465,45 +488,46 @@ class CelebADataset(torch.utils.data.Dataset):
                 print("mesh_path", mesh_path)
                 print("---")
             
+            img = self.basic_transform(img_pillow) 
             warpped_img = self.basic_transform(warpped_img)
             
             
                
                 
-            return img, warpped_img, mesh_no_last_row, mesh_trans_no_last_row, mask
+            return img
         else:
             warpped_img = self.warp_f(img_pillow)
             warpped_img = self.basic_transform(warpped_img) 
-            return img, warpped_img
+            return img
 
 
 # # Run
 
-# In[16]:
+# In[68]:
 
 
-image_size = (256,128)
+src_data_dir = "/workspace/inpaint_mask/data/CIHP/instance-level_human_parsing/Training/Images/"
+target_data_dir = "/workspace/inpaint_mask/data/warpData/CIHP/Training/"
+
+
+# In[69]:
+
+
+image_size = (512,512)
 args = type('', (), {})()
 args.mask_type = "tri"
 args.varmap_type = "notuse"
 args.varmap_threshold = -1
 
-# In[6]:
-src_data_dir = "/workspace/inpaint_mask/data/Celeb-reID-light/train/"
-target_data_dir = f"/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/{args.mask_type}/" 
+
+# In[70]:
 
 
-
-
-
-# In[17]:
-
-num_workers = 16
 batch_size = 16
-mesh_size = 10
 warp_f = GridTriangularWarp(args=args, 
-                            mesh_size = mesh_size,
-                    num_vertex_wanted_to_move=10, 
+                            # mesh_size = 16,
+                            mesh_size = 24,
+                            num_vertex_wanted_to_move=10, 
                             warp_min_factor=1,
                             warp_max_factor=9,
                             return_mesh=True, 
@@ -513,20 +537,24 @@ dataset = CelebADataset(warp_f,
                         image_size=image_size,
                         return_mesh=True,
                         savePath=target_data_dir )
-data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False,drop_last=False, num_workers=num_workers)
-print("num_workers",num_workers)
+data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, 
+                                          shuffle=False,
+                                          drop_last=False,
+                                          num_workers=16)
 
-# In[18]:
+
+# In[71]:
 
 cnt = 0
 for data in data_loader:
-    cnt += data[0].shape[0]
+    cnt += data.shape[0]
     # break
 print("total length:",cnt)
 
+# In[72]:
 
-# In[19]:
-sample_id = "23_15_0"
+
+sample_id = "0000006"
 
 origin = Image.open(f"{target_data_dir}/origin/{sample_id}.jpg")
 warpped = Image.open(f"{target_data_dir}/warpped/{sample_id}.jpg")
@@ -534,7 +562,15 @@ mask = np.load(f"{target_data_dir}/mask/{sample_id}.npy")
 mesh_tran_pts = np.load(f"{target_data_dir}/mesh/{sample_id}.npz")["mesh_tran"]
 
 
-# In[20]:
+# In[73]:
+
+
+# (np.array(
+#     Image.fromarray(np.uint8(mask * 255)[:,:,0]))
+#     /255)[...,np.newaxis].shape
+
+
+# In[74]:
 
 
 fig, axs = plt.subplots(2, 3, figsize=(16,8))
@@ -548,6 +584,25 @@ axs[1,1].imshow( Image.fromarray(np.uint8(np.array(warpped) * mask)))
 axs[1,2].imshow(mask ,cmap="gray")
 axs[1,2].triplot(mesh_tran_pts[:,0], mesh_tran_pts[:,1], spatial.Delaunay(mesh_tran_pts).simplices.copy())
 fig.savefig(f"{target_data_dir}/sample.jpg")
+
+
+# In[75]:
+
+
+# center_crop_f = transforms.CenterCrop(size= (512,512))
+# img_pillow_origin = Image.open('/workspace/inpaint_mask/data/CIHP/instance-level_human_parsing/Training/Images/0000006.jpg')
+# img_pillow = center_crop_f(img_pillow_origin)
+# padding_mask_pillow= center_crop_f(Image.fromarray(np.ones_like(img_pillow_origin)*255))
+# padding_mask = (np.array(padding_mask_pillow)/255)[...,0][...,np.newaxis]
+# Image.fromarray(np.uint8(np.ones_like(img_pillow)*255 * padding_mask))
+# # img_pillow
+
+
+# In[76]:
+
+
+# origin.size
+
 
 # In[ ]:
 
