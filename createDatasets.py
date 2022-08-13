@@ -465,6 +465,8 @@ class CelebADataset(torch.utils.data.Dataset):
                 img_pillow.save( origin_path)
                 
                 # warpped_img = self.centerCrop(warpped_img)
+                warpped_img = Image.fromarray(np.uint8(np.array(warpped_img) * padding_mask))
+                
                 warpped_path = f"{self.warpped_dir}/{self.image_names[idx]}"
                 warpped_img.save(warpped_path )
                 
@@ -473,7 +475,11 @@ class CelebADataset(torch.utils.data.Dataset):
                 #             Image.fromarray(np.uint8(mask * 255)[:,:,0]) \
                 #         ) \
                 #     )/255)[...,np.newaxis]
-                mask = mask * padding_mask 
+                
+                inv_mask = np.abs(mask - 1)
+                inv_padded_mask = inv_mask * padding_mask 
+                mask = padded_mask = np.abs(inv_padded_mask - 1)
+                
                 mask_path = f"{self.mask_dir}/{self.image_names[idx].split('.')[0]}"
                 np.save(mask_path,mask)
                 
@@ -504,20 +510,16 @@ class CelebADataset(torch.utils.data.Dataset):
 # # Run
 
 # In[68]:
-
-
-src_data_dir = "/workspace/inpaint_mask/data/CIHP/instance-level_human_parsing/Training/Images/"
-target_data_dir = "/workspace/inpaint_mask/data/warpData/CIHP/Training/"
-
-
-# In[69]:
-
-
 image_size = (512,512)
 args = type('', (), {})()
 args.mask_type = "tri"
 args.varmap_type = "notuse"
 args.varmap_threshold = -1
+
+src_data_dir = "/workspace/inpaint_mask/data/CIHP/instance-level_human_parsing/Training/Images/"
+target_data_dir = f"/workspace/inpaint_mask/data/warpData/CIHP/Training/{args.mask_type}"
+
+
 
 
 # In[70]:
