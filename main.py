@@ -2,20 +2,27 @@
 # coding: utf-8
 # In[1]:
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 # Setting:
 # In[3]:
 wandb_prefix_name = "warp_mask"
 know_args = ["--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
+             # "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
+             # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
              "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
              '--mask_type', "tri",
-             '--varmap_type', "notuse",
+             '--varmap_type', "var(warp)",
              '--varmap_threshold',"-1",
+             
+             "--mask_weight","1",
+             
              "--batch_size","16",
              "--wandb"
             ]
 image_size = (256,128)
+# image_size = (256,256)
+# image_size = (512,512)
 seed = 5
 test_size = 0.1
 
@@ -23,6 +30,7 @@ test_size = 0.1
 import argparse
 def get_args(know_args=None):
     parser = argparse.ArgumentParser(description='')
+    parser.add_argument('--note', dest='note', type=str, default="", help='note what you want')
     # Mask Setting
     parser.add_argument('--mask_type', dest='mask_type', type=str, default="grid", help='grid, tri')
     parser.add_argument('--varmap_type', dest='varmap_type', type=str, default="notuse", help='notuse, var(warp), warp(var)')
@@ -40,6 +48,8 @@ def get_args(know_args=None):
     parser.add_argument('--G_iter', dest='G_iter', type=int, default=1, help='g iter per batch')
     parser.add_argument('--type', dest='type', type=str, default="wgangp", help='GAN LOSS TYPE')
     parser.add_argument('--gp_lambda', dest='gp_lambda', type=int, default=10, help='Gradient penalty lambda hyperparameter')
+    
+    parser.add_argument('--mask_weight', dest='mask_weight', type=float, default=1.0, help='weight of mask_loss')
 
     # Dir
     parser.add_argument('--data_dir',dest='data_dir',type=str, help="warppeData dir")
@@ -490,120 +500,6 @@ class Discriminator(nn.Module):
         return out
 
 
-# # Test
-
-# In[14]:
-
-
-# ckpt_load_path = "/workspace/inpaint_mask/log/mask_inpaint_chain_multi_loss_val/1iadjdwp/ckpts/ckpt_6001_71.pt"
-ckpt_load_path = None
-
-
-# In[25]:
-
-
-""" JUST FOR TESTING """
-import time
-# def program_test(image_size,args):
-batch_size = 3
-tmp_set = WarppedDataset(
-                 args.data_dir,
-                 valid_ids,
-                 args.mask_type,
-                 args.varmap_type,
-                 args.varmap_threshold,
-                 transform=None, 
-                 return_mesh=True,
-                 checkExist=False,
-                 debug=True)
-
-tmp_loader = torch.utils.data.DataLoader(tmp_set, 
-                                          batch_size=batch_size,
-                                          shuffle=True,drop_last=True)
-G = Generator(image_size = image_size, backbone = args.backbone)
-if ckpt_load_path != None:
-    G.load_state_dict(torch.load(ckpt_load_path)['G_state_dict'])
-# MG = MaskEstimator(image_size = image_size)
-
-D = Discriminator(image_size = image_size)
-G.eval()
-D.eval()
-batch_data = next(iter(tmp_loader))
-origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks = batch_data
-generated_imgs,generated_masks = G(warpped_imgs)
-print(D(generated_imgs), D(warpped_imgs))
-print("generated_imgs",generated_imgs.shape)
-print("generated_masks",generated_masks.shape)
-
-print("show")
-ith_data = np.random.randint(0, batch_size)
-to_pillow_f = torchvision.transforms.ToPILImage()
-
- 
-img = origin_imgs[ith_data]
-warpped_img = warpped_imgs[ith_data]
-generated_img = generated_imgs[ith_data]
-generated_mask = generated_masks[ith_data]
-origin_mesh = origin_meshes[ith_data]
-warpped_mesh = warpped_meshes[ith_data]
-mask = masks[ith_data]
-print("masks",masks.shape,origin_imgs.shape)
-mask = masks.permute(0,3,1,2)[ith_data]
-masked_img = (origin_imgs[ith_data]*masks.permute(0,3,1,2)[ith_data])
-masked_warpped_img = (generated_masks * warpped_imgs)[ith_data]
-masked_origin_img = (generated_masks * origin_imgs)[ith_data]
-
-
-img = to_pillow_f(img)
-warpped_img = to_pillow_f(warpped_img)
-generated_img = to_pillow_f(generated_img)
-generated_mask = to_pillow_f(generated_mask)
-masked_img = to_pillow_f(masked_img)
-masked_warpped_img = to_pillow_f(masked_warpped_img)
-masked_origin_img = to_pillow_f(masked_origin_img)
-mask = to_pillow_f(mask)
-
-
-# In[29]:
-
-
-linewidth = 0.8
-fig, axs = plt.subplots(1, 6, figsize=(32,8))
-axs[0].imshow(img)
-axs[1].imshow(warpped_img)
-axs[2].imshow(generated_img)
-axs[3].imshow(generated_mask, cmap='gray')
-axs[4].imshow(mask, cmap='gray')
-axs[5].imshow(masked_img)
-
-
-# In[30]:
-
-
-fig, axs = plt.subplots(1, 2, figsize=(16,8))
-axs[0].imshow(masked_origin_img)
-axs[1].imshow(masked_warpped_img)
-np_loss = np.abs(np.array(masked_warpped_img) - np.array(masked_origin_img)).mean()
-torch_l1_loss = torch.nn.L1Loss()(torchvision.transforms.ToTensor()(masked_warpped_img),torchvision.transforms.ToTensor()(masked_origin_img))
-print("np_loss",np_loss)
-print("torch_l1_loss",torch_l1_loss)
-np_loss /torch_l1_loss /255
-
-
-# In[31]:
-
-
-fig, axs = plt.subplots(1, 2, figsize=(16,8))
-axs[0].imshow(masked_origin_img)
-axs[1].imshow(masked_warpped_img)
-(np.array(masked_origin_img) - np.array(masked_warpped_img)).mean()
-
-
-# In[ ]:
-
-
-
-
 
 # # Utils function
 
@@ -945,7 +841,7 @@ with tqdm(total= total_steps) as pgbars:
 
                         # genreator loss
                         # g_loss = - fake_loss + l1_loss * abs(fake_loss) + matt_loss + mask_loss
-                        g_loss = (- 1 + l1_loss + 100*matt_loss + mask_loss) * abs(fake_loss) 
+                        g_loss = (- 1 + l1_loss + 100*matt_loss + args.mask_weight*mask_loss) * abs(fake_loss) 
                         
                         
                         val_fake_loss.append(fake_loss.item())
