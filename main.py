@@ -2,26 +2,30 @@
 # coding: utf-8
 # In[1]:
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 # Setting:
 # In[3]:
 wandb_prefix_name = "warp_mask"
-know_args = ["--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
-             # "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
+know_args = ["--note", "試試 0.7 inarea + 0.3 out area, without gan",
+             "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
+             "--data_dir","/workspace/data/warpData/celeba/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
-             "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
+             #  "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
              '--mask_type', "tri",
-             '--varmap_type', "var(warp)",
+             '--varmap_type', "notuse",
              '--varmap_threshold',"-1",
-             
-             "--mask_weight","1",
+
+             '--in_area_weight',"0.3",
+             '--out_area_weight',"0.7",
+            #  '--matt_loss_weight'
+
              
              "--batch_size","16",
              "--wandb"
             ]
-image_size = (256,128)
-# image_size = (256,256)
+# image_size = (256,128)
+image_size = (256,256)
 # image_size = (512,512)
 seed = 5
 test_size = 0.1
@@ -48,6 +52,14 @@ def get_args(know_args=None):
     parser.add_argument('--G_iter', dest='G_iter', type=int, default=1, help='g iter per batch')
     parser.add_argument('--type', dest='type', type=str, default="wgangp", help='GAN LOSS TYPE')
     parser.add_argument('--gp_lambda', dest='gp_lambda', type=int, default=10, help='Gradient penalty lambda hyperparameter')
+
+    parser.add_argument('--in_area_weight', dest='in_area_weight', type=float, default=0.5, help='in_area_mask weight')
+    parser.add_argument('--out_area_weight', dest='out_area_weight', type=float, default=0.5, help='out_area_mask weight')
+
+    parser.add_argument('--matt_loss_weight', dest='matt_loss_weight', type=float, default=100, help='matt_loss weight')
+    
+
+   
     
     parser.add_argument('--mask_weight', dest='mask_weight', type=float, default=1.0, help='weight of mask_loss')
 
@@ -608,7 +620,7 @@ trainset = WarppedDataset(
                  debug=False)
 print("Total train len:",len(trainset))
 train_loader = torch.utils.data.DataLoader(trainset, 
-                                          batch_size= args.D_iter* args.batch_size,
+                                          batch_size= args.batch_size,
                                           shuffle=True,
                                           drop_last=True, 
                                           num_workers=16
@@ -632,7 +644,7 @@ val_loader = torch.utils.data.DataLoader(
                                           drop_last=True, 
                                           num_workers=16
                                          )
-val_batch_num = len(val_loader) # 要用幾個batch來驗證 ,  len(val_loader) 個batch 的話就是全部的資料
+val_batch_num = 5 #len(val_loader) # 要用幾個batch來驗證 ,  len(val_loader) 個batch 的話就是全部的資料
 # print("val_loader",len(val_loader), "src:", args.val_dir)
 print("num data per valid:",val_batch_num* args.batch_size)
 
@@ -653,13 +665,14 @@ assert D_iter > G_iter,print("WGAN Need D_iter > G_iter")
 weight_cliping_limit = 0.01
 
 """ Model """
-G = Generator(image_size = image_size, backbone = args.backbone)
-D = Discriminator(image_size = image_size)
+# G = Generator(image_size = image_size, backbone = args.backbone)
+G = MaskEstimator(image_size = image_size, backbone = args.backbone)
+# D = Discriminator(image_size = image_size)
 G = G.to(device)
-D = D.to(device)
+# D = D.to(device)
 """ Optimizer """
 optimizer_G = torch.optim.Adam(G.parameters(), lr=args.lr,betas=(0.5,0.99))
-optimizer_D = torch.optim.Adam(D.parameters(), lr=args.lr,betas=(0.5,0.99))
+# optimizer_D = torch.optim.Adam(D.parameters(), lr=args.lr,betas=(0.5,0.99))
 
 """ Loss function """
 # adversarial_loss= nn.BCELoss()
@@ -678,7 +691,7 @@ with tqdm(total= total_steps) as pgbars:
         for idx, batch_data in enumerate(train_loader):
             pgbars.set_description(f"Epoch:{epoch}/{args.epoch}-b{idx}/{len(train_loader)}")
             G.train()
-            D.train()
+            # D.train()
             
             # origin_imgs, warpped_imgs = batch_data
             origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks = batch_data
@@ -687,106 +700,82 @@ with tqdm(total= total_steps) as pgbars:
             origin_imgs, warpped_imgs = origin_imgs.to(device), warpped_imgs.to(device)
             masks = masks.to(device)
 
-            origin_list = origin_imgs.reshape((args.D_iter,-1,3,image_size[0],image_size[1]))
-            warpped_list = warpped_imgs.reshape((args.D_iter,-1,3,image_size[0],image_size[1]))
-            masks_list = masks.reshape((args.D_iter,-1,1,image_size[0],image_size[1]))
-            
-            
-            
-            # WGAN - Training discriminator more iterations than generator
-            """ UPDATE Discriminator """
-            for p in D.parameters():  # reset requires_grad
-                p.requires_grad = True
-            
-            for j in range(D_iter):
-                optimizer_D.zero_grad()
-                origin,warpped = origin_list[j], warpped_list[j]
-                assert origin.shape == (args.batch_size,3,image_size[0],image_size[1])
-                assert warpped.shape == (args.batch_size,3,image_size[0],image_size[1])
-                
-                # fake loss
-                fake_images,_ = G(warpped)
-                # fake_images = fake_images.detach()
-                fake_D_logits = D(fake_images)
-                fake_D_loss = fake_D_logits.mean(0).view(1)
-
-                # real loss
-                real_D_logits = D(origin)
-                real_D_loss = real_D_logits.mean(0).view(1)
-
-                # Train with gradient penalty
-                gradient_penalty = calc_gradient_penalty(D, origin, fake_images, device, args)
-                # print("gradient_penalty",gradient_penalty)
-
-                d_loss = fake_D_loss - real_D_loss + gradient_penalty * args.gp_lambda 
-                Wasserstein_D =  real_D_loss -  fake_D_loss
-
-                d_loss.backward()
-                torch.nn.utils.clip_grad_value_(D.parameters(), weight_cliping_limit)
-                optimizer_D.step()
-
             """ UPDATE Generator """
-            for p in D.parameters():
-                p.requires_grad = False  # to avoid computation
                 
-            for _ in range(G_iter):
-                optimizer_G.zero_grad()
-                # origin, warpped
-                i = np.random.randint(0, args.D_iter)
-                origin,warpped = origin_list[i], warpped_list[i]
-                gt_masks = masks_list[i]
-                assert origin.shape == (args.batch_size,3,image_size[0],image_size[1])
-                assert warpped.shape == (args.batch_size,3,image_size[0],image_size[1])
-                assert gt_masks.shape == (args.batch_size,1,image_size[0],image_size[1])
-                
-                # fake_loss
-                fake_images, fake_masks = G(warpped)
-                fake_logits = D(fake_images)
-                fake_loss = fake_logits.mean(0).view(1)
-                
-                # l1_loss
-                l1_loss = l1_loss_f(fake_images, origin).mean() 
-                
-                # matt_loss
-                matt_loss = l1_loss_f(fake_masks * warpped, fake_masks * origin).mean()
-                
-                # mask_loss 
-                mask_loss = l1_loss_f(fake_masks, gt_masks).mean()
+            optimizer_G.zero_grad()
 
-                # genreator loss
-                # g_loss = - fake_loss + l1_loss * abs(fake_loss) + matt_loss + mask_loss
-                g_loss = - fake_loss + ( l1_loss + 100*matt_loss + mask_loss) * abs(fake_loss) 
-                g_loss.backward()
-                optimizer_G.step()
+            origin,warpped, gt_masks = origin_imgs, warpped_imgs, masks
+            assert origin.shape == (args.batch_size,3,image_size[0],image_size[1])
+            assert warpped.shape == (args.batch_size,3,image_size[0],image_size[1])
+            assert gt_masks.shape == (args.batch_size,1,image_size[0],image_size[1])
+            
+            fake_masks = G(warpped)
+            
+
+            # mask_loss
+            in_area_mask_loss = None
+            out_area_mask_loss = None
+            # calculate in-area out-area each image
+            for i in range(len(origin)):
+                
+                out_area = (gt_masks[i] == 1)
+                in_area = (out_area == False)
+
+                in_area_mask_loss_per_image = l1_loss_f(fake_masks[i][in_area],gt_masks[i][in_area]).mean()
+                if in_area_mask_loss == None:
+                    in_area_mask_loss = in_area_mask_loss_per_image
+                else:
+                    in_area_mask_loss += in_area_mask_loss_per_image 
+
+                out_area_mask_loss_per_image = l1_loss_f(fake_masks[i][out_area], gt_masks[i][out_area]).mean() 
+                if out_area_mask_loss == None:
+                    out_area_mask_loss = out_area_mask_loss_per_image
+                else:
+                    out_area_mask_loss += out_area_mask_loss_per_image 
+            in_area_mask_loss /= len(origin)
+            out_area_mask_loss /= len(origin)
+                
+            in_area_weight = args.in_area_weight
+            out_area_weight = args.out_area_weight
+            mask_loss = in_area_weight * in_area_mask_loss + out_area_weight * out_area_mask_loss
+            
+            
+            # matt_loss
+            matt_loss = l1_loss_f(fake_masks * warpped, fake_masks * origin).mean()
+      
+
+            g_loss = args.matt_loss_weight * matt_loss + mask_loss
+
+            g_loss.backward()
+            optimizer_G.step()
 
 
             """ LOG """
             log_dict = {
                 "train":{
-                    "d_loss":d_loss.item(),
-                    "d_gradient_penalty":gradient_penalty.item(),
                     "g_loss":g_loss.item(),
-                    "g_fake_loss": fake_loss.item(),
-                    "g_l1_loss": l1_loss.item(),
                     "matt_loss":  matt_loss.item(),
+                    "in_area_mask_loss": in_area_mask_loss.item(),
+                    "out_area_mask_loss": out_area_mask_loss.item(),
                     "mask_loss": mask_loss.item(),
-                    "Wasserstein_D":Wasserstein_D.item()
                 },
                 # "val":{}
             }
             
-            del d_loss
-            del gradient_penalty
+            del in_area_mask_loss
+            del out_area_mask_loss
+            # del d_loss
+            # del gradient_penalty
             del g_loss
-            del fake_loss
-            del l1_loss
+            # del fake_loss
+            # del l1_loss
             del matt_loss
             del mask_loss
-            del Wasserstein_D
+            # del Wasserstein_D
             del batch_data 
             del origin
             del warpped
-            del fake_images
+            # del fake_images
             del fake_masks
             del gt_masks
             collected = gc.collect()
@@ -795,17 +784,17 @@ with tqdm(total= total_steps) as pgbars:
             """ NO GRAD AREA """
             with torch.no_grad():
                 G.eval()
-                D.eval()
+                # D.eval()
                 
                 origin,warpped,fake_images,fake_masks,gt_masks = None,None,None,None,None
                 """ Validation """
                 if np.mod(step, 100) == 1:
                     val_g_loss = []
-                    val_fake_loss = []
+                    
                     val_matt_loss = []
-                    val_l1_loss = []
                     val_mask_loss = []
-                    # origin,warpped,fake_images,fake_masks,gt_masks = None,None,None,None,None
+                    val_in_area_mask_loss = []
+                    val_out_area_mask_loss = []
                     
                     for idx, batch_data in enumerate(val_loader):
                         if idx == val_batch_num:
@@ -826,37 +815,56 @@ with tqdm(total= total_steps) as pgbars:
                         assert gt_masks.shape == (args.batch_size,1,image_size[0],image_size[1])
                         
                         # fake_loss
-                        fake_images, fake_masks = G(warpped)
-                        fake_logits = D(fake_images)
-                        fake_loss = fake_logits.mean(0).view(1)
-
-                        # l1_loss
-                        l1_loss = l1_loss_f(fake_images, origin).mean() 
+                        fake_masks = G(warpped)
 
                         # matt_loss
                         matt_loss = l1_loss_f(fake_masks * warpped, fake_masks * origin).mean()
 
                         # mask_loss 
-                        mask_loss = l1_loss_f(fake_masks, gt_masks).mean()
+                        in_area_mask_loss = None
+                        out_area_mask_loss = None
+                        # calculate in-area out-area each image
+                        for i in range(len(origin)):
+                            
+                            out_area = (gt_masks[i] == 1)
+                            in_area = (out_area == False)
+
+                            in_area_mask_loss_per_image = l1_loss_f(fake_masks[i][in_area],gt_masks[i][in_area]).mean()
+                            if in_area_mask_loss == None:
+                                in_area_mask_loss = in_area_mask_loss_per_image
+                            else:
+                                in_area_mask_loss += in_area_mask_loss_per_image 
+
+                            out_area_mask_loss_per_image = l1_loss_f(fake_masks[i][out_area], gt_masks[i][out_area]).mean() 
+                            if out_area_mask_loss == None:
+                                out_area_mask_loss = out_area_mask_loss_per_image
+                            else:
+                                out_area_mask_loss += out_area_mask_loss_per_image 
+                        in_area_mask_loss /= len(origin)
+                        out_area_mask_loss /= len(origin)
+                            
+                        mask_loss = in_area_weight * in_area_mask_loss + out_area_weight * out_area_mask_loss
 
                         # genreator loss
                         # g_loss = - fake_loss + l1_loss * abs(fake_loss) + matt_loss + mask_loss
-                        g_loss = (- 1 + l1_loss + 100*matt_loss + args.mask_weight*mask_loss) * abs(fake_loss) 
+                        g_loss = 100* matt_loss + mask_loss
                         
                         
-                        val_fake_loss.append(fake_loss.item())
-                        val_l1_loss.append(l1_loss.item())
+                        # val_fake_loss.append(fake_loss.item())
+                        # val_l1_loss.append(l1_loss.item())
                         val_matt_loss.append(matt_loss.item())
                         val_mask_loss.append(mask_loss.item())
+                        val_in_area_mask_loss.append(in_area_mask_loss.item())
+                        val_out_area_mask_loss.append(out_area_mask_loss.item())
                         val_g_loss.append(g_loss.item())
                     
                     # print("np.array(val_mask_loss)",np.array(val_mask_loss).shape)
                     log_dict["val"] ={
                         "g_loss": np.array(val_g_loss).mean(),
-                        "g_fake_loss": np.array(val_fake_loss).mean(),
-                        "g_l1_loss": np.array(val_l1_loss).mean(),
                         "matt_loss":  np.array(val_matt_loss).mean(),
-                        "mask_loss": np.array(val_mask_loss).mean()
+                        "mask_loss": np.array(val_mask_loss).mean(),
+                        "in_area_mask_loss": np.array(val_in_area_mask_loss).mean(),
+                        "out_area_mask_loss": np.array(val_out_area_mask_loss).mean()
                     }
                     
                     # print("log_dict[val]",log_dict["val"])
@@ -873,14 +881,14 @@ with tqdm(total= total_steps) as pgbars:
                     axs[1].set_title('warpped')
                     axs[1].imshow( to_pillow_f(warpped[k]) )
                     
-                    axs[2].set_title('fakeImage')
-                    axs[2].imshow( to_pillow_f(fake_images[k]) )
+                    # axs[2].set_title('fakeImage')
+                    # axs[2].imshow( to_pillow_f(fake_images[k]) )
 
                     axs[3].set_title('fakeMask')
-                    axs[3].imshow( to_pillow_f(fake_masks[k]),cmap='gray' )
+                    axs[3].imshow( to_pillow_f(fake_masks[k]),vmin=0, vmax=1,cmap='gray' )
                     
                     axs[4].set_title('GTMask')
-                    axs[4].imshow( to_pillow_f(gt_masks[k]),cmap='gray' )
+                    axs[4].imshow( to_pillow_f(gt_masks[k]),vmin=0, vmax=1,cmap='gray' )
                     
                     axs[5].set_title('GTMask on warpped')
                     axs[5].imshow( to_pillow_f(gt_masks[k]*warpped[k]))
@@ -898,7 +906,6 @@ with tqdm(total= total_steps) as pgbars:
                         os.makedirs(checkpoint_dir)
                     torch.save({
                         'G_state_dict': G.state_dict(),
-                        'D_state_dict':D.state_dict(),
                     }, 
                     f'{checkpoint_dir}/ckpt_{step}_{epoch}.pt'
                 )
