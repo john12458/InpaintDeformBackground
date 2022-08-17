@@ -877,10 +877,10 @@ with tqdm(total= total_steps) as pgbars:
                     axs[2].imshow( to_pillow_f(fake_images[k]) )
 
                     axs[3].set_title('fakeMask')
-                    axs[3].imshow( to_pillow_f(fake_masks[k]),cmap='gray' )
+                    axs[3].imshow( to_pillow_f(fake_masks[k]),vmin=0, vmax=1,cmap='gray' )
                     
                     axs[4].set_title('GTMask')
-                    axs[4].imshow( to_pillow_f(gt_masks[k]),cmap='gray' )
+                    axs[4].imshow( to_pillow_f(gt_masks[k]),vmin=0, vmax=1,cmap='gray' )
                     
                     axs[5].set_title('GTMask on warpped')
                     axs[5].imshow( to_pillow_f(gt_masks[k]*warpped[k]))
