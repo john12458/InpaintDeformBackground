@@ -2,26 +2,30 @@
 # coding: utf-8
 # In[1]:
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 # Setting:
 # In[3]:
 wandb_prefix_name = "warp_mask"
 know_args = ["--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
-             # "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
+             "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
-             "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
+             # "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
              '--mask_type', "tri",
-             '--varmap_type', "var(warp)",
+             '--varmap_type', "notuse",
              '--varmap_threshold',"-1",
              
              "--mask_weight","1",
              
              "--batch_size","16",
+
+             '--guassian_ksize','17',
+             '--guassian_sigma','0.0',
+             '--guassian_blur',
              "--wandb"
             ]
-image_size = (256,128)
-# image_size = (256,256)
+# image_size = (256,128)
+image_size = (256,256)
 # image_size = (512,512)
 seed = 5
 test_size = 0.1
@@ -35,6 +39,15 @@ def get_args(know_args=None):
     parser.add_argument('--mask_type', dest='mask_type', type=str, default="grid", help='grid, tri')
     parser.add_argument('--varmap_type', dest='varmap_type', type=str, default="notuse", help='notuse, var(warp), warp(var)')
     parser.add_argument('--varmap_threshold', dest='varmap_threshold', type=float, default=0.7, help='0 to 1 , if -1: not use')
+
+    parser.add_argument('--guassian_blur', dest='guassian_blur',default=False, action="store_true", help='mask output with guassian_blur or not')
+    # if ksize = 0 will calculate by sigma , see more detail on cv2.
+    # kszie1 = cvRound(sigma1*(depth == CV_8U ? 3 : 4)*2 + 1)|1;  # 但有點不太懂為什麼是這個公式
+    parser.add_argument('--guassian_ksize', dest='guassian_ksize',type=int, default=5, help='guassian_blur kernel size')
+    parser.add_argument('--guassian_sigma', dest='guassian_sigma',type=float, default=0.0, help='guassian_blur sigma')
+    
+    
+    
     
     # train Setting
     parser.add_argument('--epoch', dest='epoch', type=int, default=200, help='# of epoch')
@@ -127,6 +140,7 @@ class WarppedDataset(torch.utils.data.Dataset):
                  mask_type,
                  varmap_type,
                  varmap_threshold,
+                 guassian_blur_f,
                  transform=None, 
                  return_mesh=False,
                  checkExist=True,
@@ -136,6 +150,7 @@ class WarppedDataset(torch.utils.data.Dataset):
         self.mask_type = mask_type
         self.varmap_type = varmap_type
         self.varmap_threshold = varmap_threshold
+        self.guassian_blur_f = guassian_blur_f
           
         self.basic_transform = transforms.Compose(
         [
@@ -210,16 +225,16 @@ class WarppedDataset(torch.utils.data.Dataset):
             mask = self.transfrom(mask)
         
         varmap = self._varmap_selectior(origin,warpped,mesh_pts,mesh_tran_pts)
-        if self.debug:
-            if varmap is not None:
-                plt.imshow(varmap)
-        
-        mask = data_utils.mix_mask_var(mask,varmap,threshold=self.varmap_threshold)                 if varmap is not None else mask 
-        
+        mask = data_utils.mix_mask_var(mask,varmap,threshold=self.varmap_threshold)   if varmap is not None else mask 
+        if self.guassian_blur_f:
+            mask = self.guassian_blur_f(mask)
         
         origin = self.basic_transform(origin)
         warpped = self.basic_transform(warpped)
         
+        if self.debug:
+            if varmap is not None:
+                plt.imshow(varmap)
       
         
         if self.return_mesh:
@@ -549,6 +564,9 @@ def calc_gradient_penalty(D, real_images, fake_images, device ,args):
     grad_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() 
     return grad_penalty
 
+def create_guassian_blur_f(guassian_ksize,guassian_sigma):
+    return lambda x: cv2.GaussianBlur(x, (guassian_ksize, guassian_ksize), guassian_sigma)
+
 
 # # trainning
 
@@ -576,6 +594,8 @@ check_create_dir(checkpoint_dir+"/best/")
 sample_dir = args.log_dir + "./samples/"
 check_create_dir(sample_dir)
 
+print("Log dir:",args.log_dir)
+
 
 # In[52]:
 
@@ -595,13 +615,24 @@ check_create_dir(sample_dir)
 # print("Total train data:",len(train_ids))
 # print("Total valid data:", len(valid_ids))
 
+def create_guassian_blur_f(guassian_ksize,guassian_sigma):
+    return lambda x: cv2.GaussianBlur(x, (guassian_ksize, guassian_ksize), guassian_sigma)[...,np.newaxis]
+    
+
 """ Data """
+
+guassian_blur_f = False
+if args.guassian_blur:
+    guassian_blur_f = create_guassian_blur_f(args.guassian_ksize,args.guassian_sigma)
+    print(f"Guassian_Blur ksize:{args.guassian_ksize}, sigma:{args.guassian_sigma}")
+    
 trainset = WarppedDataset(
                  args.data_dir,
                  train_ids,
                  args.mask_type,
                  args.varmap_type,
                  args.varmap_threshold,
+                 guassian_blur_f=guassian_blur_f,
                  transform=None, 
                  return_mesh=True,
                  checkExist=False,
@@ -620,6 +651,7 @@ validset = WarppedDataset(
                  args.mask_type,
                  args.varmap_type,
                  args.varmap_threshold,
+                 guassian_blur_f=guassian_blur_f,
                  transform=None, 
                  return_mesh=True,
                  checkExist=False,
@@ -877,11 +909,13 @@ with tqdm(total= total_steps) as pgbars:
                     axs[2].imshow( to_pillow_f(fake_images[k]) )
 
                     axs[3].set_title('fakeMask')
-                    axs[3].imshow( to_pillow_f(fake_masks[k]),vmin=0, vmax=1,cmap='gray' )
+                    # 變成pillow之後 vmax應該改成255 而不是 1
+                    axs[3].imshow( to_pillow_f(fake_masks[k]),vmin=0, vmax=255,cmap='gray' )
                     
                     axs[4].set_title('GTMask')
-                    axs[4].imshow( to_pillow_f(gt_masks[k]),vmin=0, vmax=1,cmap='gray' )
-                    
+                    # 變成pillow之後 vmax應該改成255 而不是 1
+                    axs[4].imshow( to_pillow_f(gt_masks[k]),vmin=0, vmax=255,cmap='gray' )
+
                     axs[5].set_title('GTMask on warpped')
                     axs[5].imshow( to_pillow_f(gt_masks[k]*warpped[k]))
 
