@@ -7,12 +7,13 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 # Setting:
 # In[3]:
 wandb_prefix_name = "warp_mask"
-know_args = ["--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
-             "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
+know_args = ['--note',"Try to small gird varmap (8x8)"
+             "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
+             "--data_dir","/workspace/data/warpData/celeba/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
              '--mask_type', "tri",
-             '--varmap_type', "notuse",
+             '--varmap_type', "small_grid",
              '--varmap_threshold',"-1",
              
              "--mask_weight","1",
@@ -37,7 +38,7 @@ def get_args(know_args=None):
     parser.add_argument('--note', dest='note', type=str, default="", help='note what you want')
     # Mask Setting
     parser.add_argument('--mask_type', dest='mask_type', type=str, default="grid", help='grid, tri')
-    parser.add_argument('--varmap_type', dest='varmap_type', type=str, default="notuse", help='notuse, var(warp), warp(var)')
+    parser.add_argument('--varmap_type', dest='varmap_type', type=str, default="notuse", help='notuse, var(warp), warp(var), small_grid')
     parser.add_argument('--varmap_threshold', dest='varmap_threshold', type=float, default=0.7, help='0 to 1 , if -1: not use')
 
     parser.add_argument('--guassian_blur', dest='guassian_blur',default=False, action="store_true", help='mask output with guassian_blur or not')
@@ -185,7 +186,7 @@ class WarppedDataset(torch.utils.data.Dataset):
             else:
                 raise FileNotFoundError(f"{select_image_id} is broken")
                 
-    def _varmap_selectior(self,origin,warpped,mesh_pts,mesh_tran_pts):
+    def _varmap_selector(self,origin,warpped,mesh_pts,mesh_tran_pts):
         if self.varmap_type == "notuse":
             return None
         
@@ -193,6 +194,7 @@ class WarppedDataset(torch.utils.data.Dataset):
             raise NotImplementedError(f"varmap in grid  not implemented!")
                 
         elif self.mask_type == "tri":
+
             if self.varmap_type == "var(warp)":
                 return data_utils.get_tri_varmap(np.array(warpped),mesh_pts)
 
@@ -201,7 +203,13 @@ class WarppedDataset(torch.utils.data.Dataset):
                 image_size = (src_image.shape[0], src_image[1])
                 tri_varmap = data_utils.get_tri_varmap(src_image, mesh_pts)
                 return data_utils.warp_image(tri_varmap, mesh_pts, mesh_tran_pts, image_size)
-
+            elif self.varmap_type == "small_grid":
+                mesh_size_for_varmap = 8 
+                src_image = np.array(origin)
+                image_size = (src_image.shape[0], src_image.shape[1])
+                mesh_for_varmap = data_utils.create_mesh(image_size= image_size, mesh_size = mesh_size_for_varmap)
+                small_grid_varmap = data_utils.get_var_map(src_image,mesh_for_varmap)
+                return small_grid_varmap
             else:
                 raise NotImplementedError(f"varmap_type {self.varmap_type} not implemented!")
         else:
@@ -224,7 +232,12 @@ class WarppedDataset(torch.utils.data.Dataset):
             warpped = self.transfrom(warpped)
             mask = self.transfrom(mask)
         
-        varmap = self._varmap_selectior(origin,warpped,mesh_pts,mesh_tran_pts)
+        varmap = self._varmap_selector(origin,warpped,mesh_pts,mesh_tran_pts)
+        if self.debug:
+            if varmap is not None:
+                plt.imshow(varmap)
+                plt.savefig('./varmap_sample.jpg')
+
         mask = data_utils.mix_mask_var(mask,varmap,threshold=self.varmap_threshold)   if varmap is not None else mask 
         if self.guassian_blur_f:
             mask = self.guassian_blur_f(mask)
@@ -232,9 +245,7 @@ class WarppedDataset(torch.utils.data.Dataset):
         origin = self.basic_transform(origin)
         warpped = self.basic_transform(warpped)
         
-        if self.debug:
-            if varmap is not None:
-                plt.imshow(varmap)
+       
       
         
         if self.return_mesh:
@@ -625,6 +636,15 @@ guassian_blur_f = False
 if args.guassian_blur:
     guassian_blur_f = create_guassian_blur_f(args.guassian_ksize,args.guassian_sigma)
     print(f"Guassian_Blur ksize:{args.guassian_ksize}, sigma:{args.guassian_sigma}")
+
+
+# print("Dataset Test")
+# tmpset = WarppedDataset(args.data_dir,train_ids,args.mask_type,args.varmap_type,args.varmap_threshold,guassian_blur_f=guassian_blur_f,transform=None, return_mesh=True,checkExist=False,
+#                  debug=True)
+# tmp_loader = torch.utils.data.DataLoader(tmpset, batch_size= args.D_iter* args.batch_size,shuffle=True,drop_last=True, num_workers=16)
+# tmp_batch = next(iter(tmpset))
+# del tmpset, tmp_loader, tmp_batch 
+
     
 trainset = WarppedDataset(
                  args.data_dir,
