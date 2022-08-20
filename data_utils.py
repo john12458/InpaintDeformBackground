@@ -3,6 +3,21 @@ from matplotlib import path
 import numpy as np
 import scipy.spatial as spatial
 
+def create_mesh(image_size,mesh_size: int):
+    assert len(image_size) == 2, print("image_size len must be 2", len(image_size))
+    # Create Mesh
+    x = np.linspace(2,  image_size[0]-2, image_size[0]//mesh_size)
+    y = np.linspace(2,  image_size[1]-2, image_size[1]//mesh_size)
+    # x = np.linspace(self.mesh_size,  image_size[0]-self.mesh_size, image_size[0]//self.mesh_size)
+    # y = np.linspace(self.mesh_size,  image_size[1]-self.mesh_size, image_size[1]//self.mesh_size)
+    xv, yv = np.meshgrid( y,x)
+    mesh = np.concatenate( (xv[np.newaxis,:], yv[np.newaxis,:]) )
+    mesh = np.int32(mesh)
+    # mesh_pts = mesh.reshape(2,-1).T
+    
+    return mesh
+
+
 def bilinear_interpolate(img, coords):
     """ Interpolates over every image channel
     http://en.wikipedia.org/wiki/Bilinear_interpolation
