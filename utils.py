@@ -9,7 +9,7 @@ import cv2
 to_pillow_f = torchvision.transforms.ToPILImage()
 
 def create_guassian_blur_f(guassian_ksize,guassian_sigma):
-    return lambda x: cv2.GaussianBlur(x, (guassian_ksize, guassian_ksize), guassian_sigma)
+    return lambda x: cv2.GaussianBlur(x, (guassian_ksize, guassian_ksize), guassian_sigma)[...,np.newaxis]
     
 #
 def seed_everything(seed):
