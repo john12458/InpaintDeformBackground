@@ -1,11 +1,8 @@
 #!/usr/bin/env python
 # coding: utf-8
-# In[1]:
 import os
+""" Setting """
 os.environ["CUDA_VISIBLE_DEVICES"] = "3"
-
-# Setting:
-# In[3]:
 wandb_prefix_name = "warp_mask"
 know_args = ['--note',"Try to small gird varmap (8x8)",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
@@ -32,242 +29,42 @@ image_size = (256,256)
 seed = 5
 test_size = 0.1
 val_batch_num = 5
+device = "cuda"
+weight_cliping_limit = 0.01
 
-# In[4]:
-import argparse
-def get_args(know_args=None):
-    parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--note', dest='note', type=str, default="", help='note what you want')
-    # Mask Setting
-    parser.add_argument('--mask_type', dest='mask_type', type=str, default="grid", help='grid, tri')
-    parser.add_argument('--varmap_type', dest='varmap_type', type=str, default="notuse", help='notuse, var(warp), warp(var), small_grid')
-    parser.add_argument('--varmap_threshold', dest='varmap_threshold', type=float, default=0.7, help='0 to 1 , if -1: not use')
-
-    parser.add_argument('--guassian_blur', dest='guassian_blur',default=False, action="store_true", help='mask output with guassian_blur or not')
-
-    
-    # if ksize = 0 will calculate by sigma , see more detail on cv2.
-    # kszie1 = cvRound(sigma1*(depth == CV_8U ? 3 : 4)*2 + 1)|1;  # 但有點不太懂為什麼是這個公式
-    parser.add_argument('--guassian_ksize', dest='guassian_ksize',type=int, default=5, help='guassian_blur kernel size')
-    parser.add_argument('--guassian_sigma', dest='guassian_sigma',type=float, default=0.0, help='guassian_blur sigma')
-    
-    
-    
-    
-    # train Setting
-    parser.add_argument('--epoch', dest='epoch', type=int, default=200, help='# of epoch')
-    parser.add_argument('--batch_size', dest='batch_size', type=int, default=1, help='# images in batch')
-    parser.add_argument('--lr', dest='lr', type=float, default=0.0002, help='initial learning rate for optimizer')
-    
-    # Model Setting
-    parser.add_argument('--backbone', dest='backbone', type=str, default="convnext_base_in22k", help='models in timm')
-    
-    parser.add_argument('--D_iter', dest='D_iter', type=int, default=5, help='d iter per batch')
-    parser.add_argument('--G_iter', dest='G_iter', type=int, default=1, help='g iter per batch')
-    parser.add_argument('--type', dest='type', type=str, default="wgangp", help='GAN LOSS TYPE')
-    parser.add_argument('--gp_lambda', dest='gp_lambda', type=int, default=10, help='Gradient penalty lambda hyperparameter')
-    
-    parser.add_argument('--mask_weight', dest='mask_weight', type=float, default=1.0, help='weight of mask_loss')
-
-    parser.add_argument('--in_out_area_split', dest='in_out_area_split',default=False, action="store_true", help='split to in_area_mask_loss and out_area_mask_loss')
-    parser.add_argument('--in_area_weight', dest='in_area_weight', type=float, default=0.5, help='in_area_mask weight')
-    parser.add_argument('--out_area_weight', dest='out_area_weight', type=float, default=0.5, help='out_area_mask weight')
-
-    # Dir
-    parser.add_argument('--data_dir',dest='data_dir',type=str, help="warppeData dir")
-    # parser.add_argument('--train_dir',dest='train_dir',type=str,default="./data/celebAHQ/train_data",help="train dataset dir")
-    # parser.add_argument('--val_dir',dest='val_dir',type=str,default="./data/celebAHQ/val_data",help="val dataset dir")
-    parser.add_argument('--log_dir', dest='log_dir', default='./log/', help='log dir')
-   
-    # Other
-    parser.add_argument('--wandb',default=False, action="store_true")
-
-    args = parser.parse_args(know_args) if know_args != None else parser.parse_args()
-    return args
+# assert args.D_iter > args.G_iter,print("WGAN Need D_iter > G_iter") # wgan parameters
 
 
-# In[2]:
 import torch
-import torchvision
 import numpy as np
-from PIL import Image
-import torchvision.transforms as transforms
-import matplotlib.pyplot as plt
-from natsort import natsorted
-import cv2
-import timm
-
-import random
-import scipy.spatial as spatial
-from sklearn.model_selection import train_test_split
 from tqdm.auto import tqdm
-#
-import data_utils
+from get_args import get_args
+from utils import (
+    seed_everything,
+    checkallData,
+    check_create_dir,
+    create_guassian_blur_f,
+    to_pillow_f,
+)
+from loss_utils import (
+    calculate_mask_loss_with_split,
+    calc_gradient_penalty
+)
+from warp_dataset import WarppedDataset
+from sklearn.model_selection import train_test_split
+import timm
+from models import Generator,Discriminator
+from natsort import natsorted
+import matplotlib.pyplot as plt
 
-# Seed
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-torch.cuda.manual_seed_all(seed)
-np.random.seed(seed)
-random.seed(seed)
-torch.backends.cudnn.benchmark = False
-torch.backends.cudnn.deterministic = True
-
-
-
-
-
-
-# In[5]:
+seed_everything(seed)
 args = get_args(know_args)
 assert len(timm.list_models(args.backbone,pretrained=True)) !=0, print(f"no such backbone {args.backbone} ")
 args.image_size = image_size
 print(vars(args))
 
 
-# # Dataset
-
-# In[46]:
-
-
-def checkallData(data_dir,image_id_list):
-    print("Check all data exist")
-    origin_dir = f"{data_dir}/origin/"
-    warpped_dir = f"{data_dir}/warpped/"
-    mask_dir = f"{data_dir}/mask/"
-    mesh_dir = f"{data_dir}/mesh/"
-
-    for select_image_id in tqdm(image_id_list):
-        if os.path.exists(f"{origin_dir}/{select_image_id}.jpg")             and os.path.exists(f"{warpped_dir}/{select_image_id}.jpg")             and os.path.exists(f"{mask_dir}/{select_image_id}.npy")             and os.path.exists(f"{mesh_dir}/{select_image_id}.npz") :
-                continue
-        else:
-            raise FileNotFoundError(f"{select_image_id} is broken")
-            
-class WarppedDataset(torch.utils.data.Dataset):
-    def __init__(self, data_dir,
-                 image_ids,
-                 mask_type,
-                 varmap_type,
-                 varmap_threshold,
-                 guassian_blur_f,
-                 transform=None, 
-                 return_mesh=False,
-                 checkExist=True,
-                 debug = False):   
-        
-        self.image_ids = image_ids
-        self.mask_type = mask_type
-        self.varmap_type = varmap_type
-        self.varmap_threshold = varmap_threshold
-        self.guassian_blur_f = guassian_blur_f
-          
-        self.basic_transform = transforms.Compose(
-        [
-             transforms.ToTensor(),
-             transforms.Normalize((0., 0., 0.), (1., 1., 1.))
-        ])
-        
-        self.transform = transform 
-        self.return_mesh = return_mesh
-        
-        d_dir = f"{data_dir}/{mask_type}/"
-        self.origin_dir = f"{d_dir}/origin/"
-        self.warpped_dir = f"{d_dir}/warpped/"
-        self.mask_dir = f"{d_dir}/mask/"
-        self.mesh_dir = f"{d_dir}/mesh/"
-        
-        self.debug = debug
-       
-        if checkExist:
-            self._check_all_data_exist()
-    
-    def __len__(self): 
-        return len(self.image_ids)
-    
-    def _check_all_data_exist(self):
-        print("Check length:", len(self.image_ids))
-        print("Check Data exist")
-        for idx in tqdm(range(len( self.image_ids))):
-            select_image_id = self.image_ids[idx]
-            if os.path.exists(f"{origin_dir}/{select_image_id}.jpg")                 and os.path.exists(f"{warpped_dir}/{select_image_id}.jpg")                 and os.path.exists(f"{mask_dir}/{select_image_id}.npy")                 and os.path.exists(f"{mesh_dir}/{select_image_id}.npz") :
-                    continue
-            else:
-                raise FileNotFoundError(f"{select_image_id} is broken")
-                
-    def _varmap_selector(self,origin,warpped,mesh_pts,mesh_tran_pts):
-        if self.varmap_type == "notuse":
-            return None
-        
-        if self.mask_type == "grid":
-            raise NotImplementedError(f"varmap in grid  not implemented!")
-                
-        elif self.mask_type == "tri":
-
-            if self.varmap_type == "var(warp)":
-                return data_utils.get_tri_varmap(np.array(warpped),mesh_pts)
-
-            elif self.varmap_type == "warp(var)":
-                src_image = np.array(origin)
-                image_size = (src_image.shape[0], src_image[1])
-                tri_varmap = data_utils.get_tri_varmap(src_image, mesh_pts)
-                return data_utils.warp_image(tri_varmap, mesh_pts, mesh_tran_pts, image_size)
-            elif self.varmap_type == "small_grid":
-                mesh_size_for_varmap = 8 
-                src_image = np.array(origin)
-                image_size = (src_image.shape[0], src_image.shape[1])
-                mesh_for_varmap = data_utils.create_mesh(image_size= image_size, mesh_size = mesh_size_for_varmap)
-                small_grid_varmap = data_utils.get_var_map(src_image,mesh_for_varmap)
-                return small_grid_varmap
-            else:
-                raise NotImplementedError(f"varmap_type {self.varmap_type} not implemented!")
-        else:
-            raise NotImplementedError(f"mask_type {self.mask_type} not implemented!")
-        
-        
-    
-    def __getitem__(self, idx):
-        select_image_id = self.image_ids[idx]
-        # Get the path to the image 
-        origin = Image.open(f"{self.origin_dir}/{select_image_id}.jpg")
-        warpped = Image.open(f"{self.warpped_dir}/{select_image_id}.jpg")
-        mask = np.load(f"{self.mask_dir}/{select_image_id}.npy")
-        mesh_and_mesh_tran = np.load(f"{self.mesh_dir}/{select_image_id}.npz")
-        mesh_pts = mesh_and_mesh_tran["mesh"]
-        mesh_tran_pts = mesh_and_mesh_tran["mesh_tran"]
-        
-        if self.transform:
-            origin = self.transfrom(origin)
-            warpped = self.transfrom(warpped)
-            mask = self.transfrom(mask)
-        
-        varmap = self._varmap_selector(origin,warpped,mesh_pts,mesh_tran_pts)
-        if self.debug:
-            if varmap is not None:
-                plt.imshow(varmap)
-                plt.savefig('./varmap_sample.jpg')
-
-        mask = data_utils.mix_mask_var(mask,varmap,threshold=self.varmap_threshold)   if varmap is not None else mask 
-        if self.guassian_blur_f:
-            mask = self.guassian_blur_f(mask)
-        
-        origin = self.basic_transform(origin)
-        warpped = self.basic_transform(warpped)
-        
-       
-      
-        
-        if self.return_mesh:
-            return origin, warpped, mesh_pts, mesh_tran_pts, mask
-        else:
-            return origin, warpped, mask
-
-
-# # Split Data to train and valid
-
-# In[7]:
-
-
-
+""" Train Val Split """
 d_dir = f"{args.data_dir}/{args.mask_type}/"
 origin_dir = f"{d_dir}/origin/"
 image_names = natsorted(os.listdir(origin_dir))
@@ -280,318 +77,7 @@ train_ids, valid_ids = train_test_split(image_id_list , test_size=test_size, ran
 print("Total train data:",len(train_ids))
 print("Total valid data:", len(valid_ids))
 
-
-# # Models
-
-# In[8]:
-
-
-import torch.nn as nn
-import torch.nn.functional as F
-
-class MaskEstimator(nn.Module):
-    
-        
-    def __init__(self,image_size,backbone):
-        super().__init__()
-        self.image_size = image_size
-       
-        self.encoder = timm.create_model(backbone, pretrained=True)
-        
-        
-        md_channels = [1024,512,256,128,64,1]
-        print("md_channels",md_channels)
-        print([ (in_d*2,out_d) for in_d,out_d in zip(md_channels[:-2],md_channels[1:-1])])
-        mask_decoder_list = [self._deconv_block(in_d, out_d, drop_rate=0.5) for in_d,out_d in zip(md_channels[:-2],md_channels[1:-1])]
-        mask_decoder_list.append(
-            nn.ConvTranspose2d(
-                in_channels=md_channels[-2],
-                out_channels=md_channels[-1],
-                kernel_size=4, 
-                stride=2,
-                padding=1,
-            ),
-        )
-        mask_decoder_list.append(nn.Sigmoid())
-        self.mask_decoder = nn.ModuleList(mask_decoder_list)
-        
-        
-        
-    def _deconv_block(self,in_dim,out_dim,drop_rate=0):
-         return nn.Sequential(
-                nn.ConvTranspose2d(in_channels=in_dim,
-                    out_channels=out_dim,
-                    kernel_size=4, 
-                    stride=2,
-                    padding=1,
-                ),
-                nn.Dropout(drop_rate),
-                nn.ReLU()
-         )
-    
-    
-    def forward(self, x):
-        batch_size = x.shape[0]
-        assert x.shape == (batch_size,3,self.image_size[0],self.image_size[1])
-        hiddens = []
-        # encoder
-        latent_code = self.encoder.forward_features(x)
-        
-        # decoder
-        y =  latent_code
-        for idx,layer in enumerate(self.mask_decoder):
-            y=layer(y)
-            # print(y.shape)
-        mask = y 
-        
-        assert mask.shape == (batch_size,1,self.image_size[0],self.image_size[1]), print(mask.shape)
-        return mask
-        # return reconstruct, mask 
-
-
-# In[9]:
-
-
-import torch.nn as nn
-import torch.nn.functional as F
-
-class InpaintGenerator(nn.Module):
-    
-        
-    def __init__(self,image_size):
-        super().__init__()
-        self.image_size = image_size
-        channels = [3,64,128,256,512]
-        print("channels",channels)
-        print([ (in_d,out_d) for in_d,out_d in zip(channels[:-2],channels[1:-1])])
-        encoder_list = [ self._conv_block(in_d,out_d) for in_d,out_d in zip(channels[:-2],channels[1:-1])]
-        encoder_list.append( 
-            nn.Conv2d(
-                in_channels=channels[-2],
-                out_channels=channels[-1],
-                kernel_size=4,
-                stride=2,
-                padding=1,
-        ))
-        self.encoder = nn.ModuleList(encoder_list)
-        
-        
-        
-        d_channels = channels[::-1]  
-        print("d_channels",d_channels)
-        print([ (in_d*2,out_d) for in_d,out_d in zip(d_channels[:-2],d_channels[1:-1])])
-        decoder_list = [self._deconv_block(in_d*2, out_d, drop_rate=0.5) for in_d,out_d in zip(d_channels[:-2],d_channels[1:-1])]
-        decoder_list.append(
-            nn.ConvTranspose2d(
-                in_channels=d_channels[-2]*2,
-                out_channels=d_channels[-1],
-                kernel_size=4, 
-                stride=2,
-                padding=1,
-        ))
-        self.decoder = nn.ModuleList(decoder_list)
-        self.tanh = nn.Tanh()
-         
-
-        
-    def _deconv_block(self,in_dim,out_dim,drop_rate=0):
-         return nn.Sequential(
-                nn.ConvTranspose2d(in_channels=in_dim,
-                    out_channels=out_dim,
-                    kernel_size=4, 
-                    stride=2,
-                    padding=1,
-                ),
-                nn.Dropout(drop_rate),
-                nn.ReLU()
-         )
-    
-    def _conv_block(self,in_dim,out_dim,drop_rate=0.0):
-        return nn.Sequential(
-            nn.Conv2d(in_channels=in_dim,
-                out_channels=out_dim,
-                kernel_size=4,
-                stride=2,
-                padding=1,
-            ), 
-            nn.Dropout(drop_rate),
-            nn.LeakyReLU(0.2)
-        )  
-    
-    def forward(self, x):
-        batch_size = x.shape[0]
-        assert x.shape == (batch_size,3,self.image_size[0],self.image_size[1])
-        hiddens = []
-        # encoder
-        y = x 
-        for layer in self.encoder:
-            y = layer(y)
-            hiddens.append(y)
-        latent_code = y.clone()
-        
-        # inpaint decoder
-        # y = latent_code.clone()
-        reversed_hiddens = hiddens[::-1]
-        for idx,layer in enumerate(self.decoder):
-            if idx < len(reversed_hiddens):
-                y = torch.cat((y,reversed_hiddens[idx]),dim=1)
-            y=layer(y)
-        reconstruct =self.tanh(y)
-        assert reconstruct.shape == (batch_size,3,self.image_size[0],self.image_size[1])
-            
-        return reconstruct
-
-
-# In[10]:
-
-
-import torch.nn as nn
-import torch.nn.functional as F
-
-class Generator(nn.Module):
-    
-        
-    def __init__(self,image_size,backbone):
-        super().__init__()
-        self.image_size = image_size
-        self.MG = MaskEstimator(image_size = image_size, backbone = backbone)
-        self.IG = InpaintGenerator(image_size = image_size)
-   
-    def forward(self, x):
-        batch_size = x.shape[0]
-        assert x.shape == (batch_size,3,self.image_size[0],self.image_size[1])
-        
-        fake_masks = self.MG(x)
-        reconstructs = self.IG(x * fake_masks)
-        
-        
-            
-        return reconstructs,fake_masks
-
-
-# In[11]:
-
-
-class Discriminator(nn.Module):
-    def __init__(self,image_size):
-        super().__init__()
-        self.image_size = image_size
-        channels = [3,64,128,256,512]
-        print("channels",channels)
-        print([ (in_d,out_d) for in_d,out_d in zip(channels[:-2],channels[1:-1])])
-        encoder_list = [ self._conv_block(in_d,out_d) for in_d,out_d in zip(channels[:-2],channels[1:-1])]
-        encoder_list.append( 
-            nn.Conv2d(
-                in_channels=channels[-2],
-                out_channels=channels[-1],
-                kernel_size=4,
-                stride=1,
-                padding=1,
-        ))
-        self.encoder = nn.ModuleList(encoder_list)
-        
-        predict_in_dim = self._calculate_predictor_input_dim()
-        print("predict_in_dim",predict_in_dim)
-        self.predictor = nn.Sequential(
-            nn.Linear(  predict_in_dim, 1, bias=True), 
-        )
-        
-    def _calculate_predictor_input_dim(self):
-        batch_size = 1
-        x = torch.randn((batch_size,3,self.image_size[0],self.image_size[1]))
-        y = x 
-        for layer in self.encoder:
-            y = layer(y)
-        out = y.flatten(start_dim = 1)
-        
-        self.zero_grad()
-        return out.shape[1]
-        
-    def _conv_block(self,in_dim,out_dim,drop_rate=0):
-        return nn.Sequential(
-            nn.Conv2d(in_channels=in_dim,
-                out_channels=out_dim,
-                kernel_size=4,
-                stride=2,
-                padding=1,
-            ), 
-            nn.Dropout(drop_rate),
-            nn.LeakyReLU(0.2)
-        )  
-
-    def forward(self, x):
-        batch_size = x.shape[0]
-        assert x.shape == (batch_size,3,self.image_size[0],self.image_size[1])
-        
-        y = x 
-        for layer in self.encoder:
-            y = layer(y)
-        
-        out = y.flatten(start_dim = 1)
-
-        assert out.shape[0] == batch_size
-        out = self.predictor(out) 
-        return out
-
-
-
-# # Utils function
-
-# In[32]:
-
-
-def check_create_dir(dir_path):
-    if not os.path.exists(dir_path):
-        os.makedirs(dir_path)
-
-
-# In[33]:
-
-
-to_pillow_f = torchvision.transforms.ToPILImage()
-
-
-# In[34]:
-
-
-def calc_gradient_penalty(D, real_images, fake_images, device ,args):
-    
-    batch_size = fake_images.shape[0]
-    # cuda = bool(device == "cuda")
-
-    eta = torch.FloatTensor(batch_size,1,1,1).uniform_(0,1)
-    eta = eta.expand(batch_size, real_images.size(1), real_images.size(2), real_images.size(3))
-    eta = eta.to(device)
-  
-
-    interpolated = eta * real_images + ((1 - eta) * fake_images)
-
-    interpolated = interpolated.to(device)
-   
-
-    # define it to calculate gradient
-    interpolated = torch.autograd.Variable(interpolated, requires_grad=True)
-
-    # calculate probability of interpolated examples
-    prob_interpolated = D(interpolated)
-   
-    # calculate gradients of probabilities with respect to examples
-    gradients = torch.autograd.grad(outputs=prob_interpolated, inputs=interpolated,
-                            grad_outputs=torch.ones(prob_interpolated.size()).to(device),
-                            create_graph=True, retain_graph=True)[0]
-
-    grad_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() 
-    return grad_penalty
-
-def create_guassian_blur_f(guassian_ksize,guassian_sigma):
-    return lambda x: cv2.GaussianBlur(x, (guassian_ksize, guassian_ksize), guassian_sigma)
-
-
-# # trainning
-
-# In[35]:
-
-
+""" Wandb"""
 if args.wandb:
     import wandb
     wandb.init(project="warp_inpaint", entity='kycj')
@@ -601,11 +87,6 @@ if args.wandb:
     
     print(vars(args))
     
-
-
-# In[36]:
-
-
 """ result dir setting """
 checkpoint_dir = args.log_dir + "./ckpts/"
 check_create_dir(checkpoint_dir)
@@ -616,43 +97,11 @@ check_create_dir(sample_dir)
 print("Log dir:",args.log_dir)
 
 
-# In[52]:
-
-
-""" Split train valid Data """ 
-# move forward block
-
-# d_dir = f"{args.data_dir}/{args.mask_type}/"
-# origin_dir = f"{d_dir}/origin/"
-# image_names = natsorted(os.listdir(origin_dir))
-# image_id_list = list(map(lambda s: s.split('.')[0], image_names))
-# print(len(image_id_list))
-
-# # checkallData(d_dir,image_id_list)
-# print("Seed:",seed)
-# train_ids, valid_ids = train_test_split(image_id_list , test_size=0.25, random_state=seed)
-# print("Total train data:",len(train_ids))
-# print("Total valid data:", len(valid_ids))
-
-def create_guassian_blur_f(guassian_ksize,guassian_sigma):
-    return lambda x: cv2.GaussianBlur(x, (guassian_ksize, guassian_ksize), guassian_sigma)[...,np.newaxis]
-    
-
 """ Data """
-
 guassian_blur_f = False
 if args.guassian_blur:
     guassian_blur_f = create_guassian_blur_f(args.guassian_ksize,args.guassian_sigma)
     print(f"Guassian_Blur ksize:{args.guassian_ksize}, sigma:{args.guassian_sigma}")
-
-
-# print("Dataset Test")
-# tmpset = WarppedDataset(args.data_dir,train_ids,args.mask_type,args.varmap_type,args.varmap_threshold,guassian_blur_f=guassian_blur_f,transform=None, return_mesh=True,checkExist=False,
-#                  debug=True)
-# tmp_loader = torch.utils.data.DataLoader(tmpset, batch_size= args.D_iter* args.batch_size,shuffle=True,drop_last=True, num_workers=16)
-# tmp_batch = next(iter(tmpset))
-# del tmpset, tmp_loader, tmp_batch 
-
     
 trainset = WarppedDataset(
                  args.data_dir,
@@ -698,21 +147,6 @@ print(f"val_batch_num : {val_batch_num}/{len(val_loader)}")
 print("num data per valid:",val_batch_num* args.batch_size)
 
 
-# In[53]:
-
-
-from tqdm import tqdm
-# def train(G,D,train_loader,val_dataloader,args):
-
-device = "cuda"
-
-D_iter = args.D_iter
-G_iter = args.G_iter
-
-# wgan parameters
-assert D_iter > G_iter,print("WGAN Need D_iter > G_iter")
-weight_cliping_limit = 0.01
-
 """ Model """
 G = Generator(image_size = image_size, backbone = args.backbone)
 D = Discriminator(image_size = image_size)
@@ -726,35 +160,6 @@ optimizer_D = torch.optim.Adam(D.parameters(), lr=args.lr,betas=(0.5,0.99))
 # adversarial_loss= nn.BCELoss()
 l1_loss_f = torch.nn.L1Loss()
 
-def calculate_mask_loss_with_split(gt_masks, fake_masks, in_area_weight, out_area_weight, loss_f):
-    # in_out_area_split
-    in_area_mask_loss = None
-    out_area_mask_loss = None
-    # calculate in-area out-area each image
-    for i in range(len(gt_masks)):
-        
-        out_area = (gt_masks[i] == 1)
-        in_area = (out_area == False)
-
-        in_area_mask_loss_per_image = loss_f(fake_masks[i][in_area],gt_masks[i][in_area]).mean()
-        if in_area_mask_loss == None:
-            in_area_mask_loss = in_area_mask_loss_per_image
-        else:
-            in_area_mask_loss += in_area_mask_loss_per_image 
-
-        out_area_mask_loss_per_image = loss_f(fake_masks[i][out_area], gt_masks[i][out_area]).mean() 
-        if out_area_mask_loss == None:
-            out_area_mask_loss = out_area_mask_loss_per_image
-        else:
-            out_area_mask_loss += out_area_mask_loss_per_image 
-    in_area_mask_loss /= len(gt_masks)
-    out_area_mask_loss /= len(gt_masks)
-        
-    in_area_weight = args.in_area_weight
-    out_area_weight = args.out_area_weight
-    mask_loss = in_area_weight * in_area_mask_loss + out_area_weight * out_area_mask_loss
-
-    return mask_loss, in_area_mask_loss, out_area_mask_loss
 
 # In[54]:
 
@@ -788,7 +193,7 @@ with tqdm(total= total_steps) as pgbars:
             for p in D.parameters():  # reset requires_grad
                 p.requires_grad = True
             
-            for j in range(D_iter):
+            for j in range(args.D_iter):
                 optimizer_D.zero_grad()
                 origin,warpped = origin_list[j], warpped_list[j]
                 assert origin.shape == (args.batch_size,3,image_size[0],image_size[1])
@@ -819,7 +224,7 @@ with tqdm(total= total_steps) as pgbars:
             for p in D.parameters():
                 p.requires_grad = False  # to avoid computation
                 
-            for _ in range(G_iter):
+            for _ in range(args.G_iter):
                 optimizer_G.zero_grad()
                 # origin, warpped
                 i = np.random.randint(0, args.D_iter)
