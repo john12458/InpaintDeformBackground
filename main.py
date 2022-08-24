@@ -7,9 +7,9 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 # Setting:
 # In[3]:
 wandb_prefix_name = "warp_mask"
-know_args = ['--note',"Try to small gird varmap (8x8)"
+know_args = ['--note',"Try to small gird varmap (8x8)",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
-             "--data_dir","/workspace/data/warpData/celeba/",
+             "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
              '--mask_type', "tri",
@@ -23,6 +23,7 @@ know_args = ['--note',"Try to small gird varmap (8x8)"
              '--guassian_ksize','17',
              '--guassian_sigma','0.0',
              '--guassian_blur',
+            #  "--in_out_area_split",
              "--wandb"
             ]
 # image_size = (256,128)
@@ -30,6 +31,7 @@ image_size = (256,256)
 # image_size = (512,512)
 seed = 5
 test_size = 0.1
+val_batch_num = 5
 
 # In[4]:
 import argparse
@@ -42,6 +44,8 @@ def get_args(know_args=None):
     parser.add_argument('--varmap_threshold', dest='varmap_threshold', type=float, default=0.7, help='0 to 1 , if -1: not use')
 
     parser.add_argument('--guassian_blur', dest='guassian_blur',default=False, action="store_true", help='mask output with guassian_blur or not')
+
+    
     # if ksize = 0 will calculate by sigma , see more detail on cv2.
     # kszie1 = cvRound(sigma1*(depth == CV_8U ? 3 : 4)*2 + 1)|1;  # 但有點不太懂為什麼是這個公式
     parser.add_argument('--guassian_ksize', dest='guassian_ksize',type=int, default=5, help='guassian_blur kernel size')
@@ -64,6 +68,10 @@ def get_args(know_args=None):
     parser.add_argument('--gp_lambda', dest='gp_lambda', type=int, default=10, help='Gradient penalty lambda hyperparameter')
     
     parser.add_argument('--mask_weight', dest='mask_weight', type=float, default=1.0, help='weight of mask_loss')
+
+    parser.add_argument('--in_out_area_split', dest='in_out_area_split',default=False, action="store_true", help='split to in_area_mask_loss and out_area_mask_loss')
+    parser.add_argument('--in_area_weight', dest='in_area_weight', type=float, default=0.5, help='in_area_mask weight')
+    parser.add_argument('--out_area_weight', dest='out_area_weight', type=float, default=0.5, help='out_area_mask weight')
 
     # Dir
     parser.add_argument('--data_dir',dest='data_dir',type=str, help="warppeData dir")
@@ -684,8 +692,9 @@ val_loader = torch.utils.data.DataLoader(
                                           drop_last=True, 
                                           num_workers=16
                                          )
-val_batch_num = len(val_loader) # 要用幾個batch來驗證 ,  len(val_loader) 個batch 的話就是全部的資料
+val_batch_num = min(len(val_loader),val_batch_num) if val_batch_num> 0 else len(val_loader)  # 要用幾個batch來驗證 ,  len(val_loader) 個batch 的話就是全部的資料
 # print("val_loader",len(val_loader), "src:", args.val_dir)
+print(f"val_batch_num : {val_batch_num}/{len(val_loader)}")
 print("num data per valid:",val_batch_num* args.batch_size)
 
 
@@ -717,6 +726,35 @@ optimizer_D = torch.optim.Adam(D.parameters(), lr=args.lr,betas=(0.5,0.99))
 # adversarial_loss= nn.BCELoss()
 l1_loss_f = torch.nn.L1Loss()
 
+def calculate_mask_loss_with_split(gt_masks, fake_masks, in_area_weight, out_area_weight, loss_f):
+    # in_out_area_split
+    in_area_mask_loss = None
+    out_area_mask_loss = None
+    # calculate in-area out-area each image
+    for i in range(len(gt_masks)):
+        
+        out_area = (gt_masks[i] == 1)
+        in_area = (out_area == False)
+
+        in_area_mask_loss_per_image = loss_f(fake_masks[i][in_area],gt_masks[i][in_area]).mean()
+        if in_area_mask_loss == None:
+            in_area_mask_loss = in_area_mask_loss_per_image
+        else:
+            in_area_mask_loss += in_area_mask_loss_per_image 
+
+        out_area_mask_loss_per_image = loss_f(fake_masks[i][out_area], gt_masks[i][out_area]).mean() 
+        if out_area_mask_loss == None:
+            out_area_mask_loss = out_area_mask_loss_per_image
+        else:
+            out_area_mask_loss += out_area_mask_loss_per_image 
+    in_area_mask_loss /= len(gt_masks)
+    out_area_mask_loss /= len(gt_masks)
+        
+    in_area_weight = args.in_area_weight
+    out_area_weight = args.out_area_weight
+    mask_loss = in_area_weight * in_area_mask_loss + out_area_weight * out_area_mask_loss
+
+    return mask_loss, in_area_mask_loss, out_area_mask_loss
 
 # In[54]:
 
@@ -803,7 +841,11 @@ with tqdm(total= total_steps) as pgbars:
                 matt_loss = l1_loss_f(fake_masks * warpped, fake_masks * origin).mean()
                 
                 # mask_loss 
-                mask_loss = l1_loss_f(fake_masks, gt_masks).mean()
+                mask_loss, in_area_mask_loss, out_area_mask_loss = torch.zeros(1), torch.zeros(1), torch.zeros(1) 
+                if args.in_out_area_split:
+                    mask_loss, in_area_mask_loss, out_area_mask_loss = calculate_mask_loss_with_split(gt_masks, fake_masks, args.in_area_weight, args.out_area_weight, l1_loss_f)
+                else:
+                    mask_loss = l1_loss_f(fake_masks, gt_masks).mean()
 
                 # genreator loss
                 # g_loss = - fake_loss + l1_loss * abs(fake_loss) + matt_loss + mask_loss
@@ -822,6 +864,8 @@ with tqdm(total= total_steps) as pgbars:
                     "g_l1_loss": l1_loss.item(),
                     "matt_loss":  matt_loss.item(),
                     "mask_loss": mask_loss.item(),
+                    "in_area_mask_loss": in_area_mask_loss.item(),
+                    "out_area_mask_loss": out_area_mask_loss.item(),
                     "Wasserstein_D":Wasserstein_D.item()
                 },
                 # "val":{}
@@ -857,6 +901,8 @@ with tqdm(total= total_steps) as pgbars:
                     val_matt_loss = []
                     val_l1_loss = []
                     val_mask_loss = []
+                    val_in_area_mask_loss = []
+                    val_out_area_mask_loss = []
                     # origin,warpped,fake_images,fake_masks,gt_masks = None,None,None,None,None
                     
                     for idx, batch_data in enumerate(val_loader):
@@ -889,7 +935,11 @@ with tqdm(total= total_steps) as pgbars:
                         matt_loss = l1_loss_f(fake_masks * warpped, fake_masks * origin).mean()
 
                         # mask_loss 
-                        mask_loss = l1_loss_f(fake_masks, gt_masks).mean()
+                        mask_loss, in_area_mask_loss, out_area_mask_loss = torch.zeros(1), torch.zeros(1), torch.zeros(1) 
+                        if args.in_out_area_split:
+                            mask_loss, in_area_mask_loss, out_area_mask_loss = calculate_mask_loss_with_split(gt_masks, fake_masks, args.in_area_weight, args.out_area_weight, l1_loss_f)
+                        else:
+                            mask_loss = l1_loss_f(fake_masks, gt_masks).mean()
 
                         # genreator loss
                         # g_loss = - fake_loss + l1_loss * abs(fake_loss) + matt_loss + mask_loss
@@ -900,7 +950,10 @@ with tqdm(total= total_steps) as pgbars:
                         val_l1_loss.append(l1_loss.item())
                         val_matt_loss.append(matt_loss.item())
                         val_mask_loss.append(mask_loss.item())
+                        val_in_area_mask_loss.append(in_area_mask_loss.item())
+                        val_out_area_mask_loss.append(out_area_mask_loss.item())
                         val_g_loss.append(g_loss.item())
+
                     
                     # print("np.array(val_mask_loss)",np.array(val_mask_loss).shape)
                     log_dict["val"] ={
@@ -908,7 +961,9 @@ with tqdm(total= total_steps) as pgbars:
                         "g_fake_loss": np.array(val_fake_loss).mean(),
                         "g_l1_loss": np.array(val_l1_loss).mean(),
                         "matt_loss":  np.array(val_matt_loss).mean(),
-                        "mask_loss": np.array(val_mask_loss).mean()
+                        "mask_loss": np.array(val_mask_loss).mean(),
+                        "in_area_mask_loss": np.array(val_in_area_mask_loss).mean(),
+                        "out_area_mask_loss": np.array(val_out_area_mask_loss).mean()
                     }
                     
                     # print("log_dict[val]",log_dict["val"])
