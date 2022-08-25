@@ -4,7 +4,7 @@ import os
 """ Setting """
 os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 wandb_prefix_name = "warp_mask"
-know_args = ['--note',"Try to small gird varmap (8x8)",
+know_args = ['--note',"with threshold 0.5",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
              "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
@@ -19,8 +19,14 @@ know_args = ['--note',"Try to small gird varmap (8x8)",
 
              '--guassian_ksize','17',
              '--guassian_sigma','0.0',
+
+             '--in_area_weight',"0.8",
+             '--out_area_weight',"0.2",
+
              '--guassian_blur',
-            #  "--in_out_area_split",
+             
+             "--in_out_area_split",
+
              "--wandb"
             ]
 # image_size = (256,128)

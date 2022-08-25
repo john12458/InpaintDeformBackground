@@ -6,8 +6,13 @@ def calculate_mask_loss_with_split(gt_masks, fake_masks, in_area_weight, out_are
     # calculate in-area out-area each image
     for i in range(len(gt_masks)):
         
-        out_area = (gt_masks[i] == 1)
-        in_area = (out_area == False)
+        # out_area = (gt_masks[i] == 1)
+        # in_area = (out_area == False)
+        # in_area = (gt_masks[i] == 0)
+        # out_area = (in_area == False)
+        threshold = 0.5
+        in_area = (gt_masks[i] <= threshold)
+        out_area = (in_area == False)
 
         in_area_mask_loss_per_image = loss_f(fake_masks[i][in_area],gt_masks[i][in_area]).mean()
         if in_area_mask_loss == None:
