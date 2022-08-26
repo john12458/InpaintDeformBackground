@@ -2,7 +2,19 @@ import torch
 import torch.nn as nn
 from .generators.mask_estimator import MaskEstimator
 from .generators.inpaint_generator import InpaintGenerator
-
+from .deepfillv2.network import GatedGenerator
+class Generator_deepfillv2(nn.Module):
+    
+    def __init__(self, image_size, opt):
+        super().__init__()
+        self.MG = MaskEstimator(image_size = image_size, backbone = opt.backbone)
+        self.IG = GatedGenerator(opt)
+   
+    def forward(self, x):
+        batch_size = x.shape[0]
+        fake_masks = self.MG(x)
+        first_out, second_out= self.IG(x, fake_masks)
+        return first_out, second_out, fake_masks
 
 class Generator(nn.Module):
     
