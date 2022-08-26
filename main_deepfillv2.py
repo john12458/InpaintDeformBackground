@@ -9,7 +9,7 @@ image_size = (256,256)
 seed = 5
 test_size = 0.1
 device = "cuda"
-weight_cliping_limit = 0.01
+# weight_cliping_limit = 0.01
 know_args = None
 opt = get_args(know_args)
 if opt.multi_gpu == True:
@@ -192,7 +192,27 @@ def WGAN_trainer(opt):
                                           drop_last=True, 
                                           num_workers=16
                                           )
-    dataloader = train_loader
+
+    validset = WarppedDataset(
+                 opt.data_dir,
+                 valid_ids,
+                 opt.mask_type,
+                 opt.varmap_type,
+                 opt.varmap_threshold,
+                 guassian_blur_f=guassian_blur_f,
+                 transform=None, 
+                 return_mesh=True,
+                 checkExist=False,
+                 debug=False)
+    print("Total valid len:",len(validset))
+    val_loader = torch.utils.data.DataLoader( 
+                                            validset, 
+                                            batch_size= opt.batch_size,
+                                            shuffle=True,
+                                            drop_last=True, 
+                                            num_workers=16
+                                            )                        
+    val_batch_num = 5 # len(val_loader)  # 要用幾個batch來驗證 ,  len(val_loader) 個batch 的話就是全部的資料
     
     
     # ----------------------------------------
@@ -207,7 +227,7 @@ def WGAN_trainer(opt):
 
     # Training loop
     for epoch in range(opt.resume_epoch, opt.epochs):
-        for batch_idx, batch_data in enumerate(dataloader):
+        for batch_idx, batch_data in enumerate(train_loader):
             #  (img, height, width) = batch_data
             # img = img.cuda()
             # set the same free form masks for each batch
@@ -220,7 +240,6 @@ def WGAN_trainer(opt):
             masks = masks.permute(0,3,1,2)
             origin_imgs, warpped_imgs = origin_imgs.to(device), warpped_imgs.to(device)
             masks = masks.float().to(device)
-            
             # deepfillv2 0:unmask 1:mask, 跟原本 mask 0:mask, 1: unmask不一樣
             img, mask = origin_imgs, (1 - masks)
 
@@ -236,16 +255,16 @@ def WGAN_trainer(opt):
             optimizer_d.zero_grad()
 
             # Generator output
-            first_out, second_out = generator(img, mask)
+            first_out, second_out = generator(warpped_imgs, mask)
 
             # forward propagation
-            first_out_wholeimg = img * (1 - mask) + first_out * mask        # in range [0, 1]
-            second_out_wholeimg = img * (1 - mask) + second_out * mask      # in range [0, 1]
+            first_out_wholeimg = warpped_imgs * (1 - mask) + first_out * mask        # in range [0, 1]
+            second_out_wholeimg = warpped_imgs * (1 - mask) + second_out * mask      # in range [0, 1]
 
             # Fake samples
             fake_scalar = discriminator(second_out_wholeimg.detach(), mask)
             # True samples
-            true_scalar = discriminator(img, mask)
+            true_scalar = discriminator(origin_imgs, mask)
 
             
             # Loss and optimize
@@ -260,17 +279,17 @@ def WGAN_trainer(opt):
             optimizer_g.zero_grad()
 
             # L1 Loss
-            first_L1Loss = (first_out - img).abs().mean()
-            second_L1Loss = (second_out - img).abs().mean()
+            first_L1Loss = (first_out - origin_imgs).abs().mean()
+            second_L1Loss = (second_out - origin_imgs).abs().mean()
             
             # GAN Loss
             fake_scalar = discriminator(second_out_wholeimg, mask)
             GAN_Loss = -torch.mean(fake_scalar)
 
             # Get the deep semantic feature maps, and compute Perceptual Loss
-            img_featuremaps = perceptualnet(img)                          # feature maps
+            origin_img_featuremaps = perceptualnet(origin_imgs)                          # feature maps
             second_out_featuremaps = perceptualnet(second_out)
-            second_PerceptualLoss = L1Loss(second_out_featuremaps, img_featuremaps)
+            second_PerceptualLoss = L1Loss(second_out_featuremaps, origin_img_featuremaps)
 
             # Compute losses
             loss = opt.lambda_l1 * first_L1Loss + opt.lambda_l1 * second_L1Loss + \
@@ -279,42 +298,98 @@ def WGAN_trainer(opt):
             optimizer_g.step()
 
             # Determine approximate time left
-            batches_done = epoch * len(dataloader) + batch_idx
-            batches_left = opt.epochs * len(dataloader) - batches_done
+            batches_done = epoch * len(train_loader) + batch_idx
+            batches_left = opt.epochs * len(train_loader) - batches_done
             time_left = datetime.timedelta(seconds = batches_left * (time.time() - prev_time))
             prev_time = time.time()
 
             """ LOG """
-            if opt.wandb:
-                log_dict = {
-                    "train":{
-                        "first_Mask_L1_Loss":  first_L1Loss.item(),
-                        "second_Mask_L1_Loss": second_L1Loss.item(),
-                        "Perceptual_Loss": second_PerceptualLoss.item(),
-                        "epoch": epoch 
-                    },
-                    "val":{}
-                }
-                wandb.log(log_dict,commit=False)
+            log_dict = {
+                "train":{
+                    "first_Mask_L1_Loss":  first_L1Loss.item(),
+                    "second_Mask_L1_Loss": second_L1Loss.item(),
+                    "Perceptual_Loss": second_PerceptualLoss.item(),
+                    "epoch": epoch 
+                },
+                "val":{}
+            }
+                
 
 
             # Print log
             print("\r[Epoch %d/%d] [Batch %d/%d] [first Mask L1 Loss: %.5f] [second Mask L1 Loss: %.5f]" %
-                ((epoch + 1), opt.epochs, batch_idx, len(dataloader), first_L1Loss.item(), second_L1Loss.item()))
+                ((epoch + 1), opt.epochs, batch_idx, len(train_loader), first_L1Loss.item(), second_L1Loss.item()))
             print("\r[D Loss: %.5f] [G Loss: %.5f] [Perceptual Loss: %.5f] time_left: %s" %
                 (loss_D.item(), GAN_Loss.item(), second_PerceptualLoss.item(), time_left))
             
-            masked_img = img * (1 - mask) + mask
+            masked_warpped = warpped_imgs * (1 - mask) + mask
             mask = torch.cat((mask, mask, mask), 1)
+            """ Validation """
             if (batch_idx + 1) % 40 == 0:
-                img_list = [img, mask, masked_img, first_out, second_out]
-                name_list = ['gt', 'mask', 'masked_img', 'first_out', 'second_out']
-                img_path =  deepfillv2_utils.save_sample_png(sample_folder = sample_dir, sample_name = 'epoch%d' % (epoch + 1), img_list = img_list, name_list = name_list, pixel_max_cnt = 255)
-                print(img_path)
-                if opt.wandb:
-                    wandb.log({"Sample_Image_Train": wandb.Image(img_path)} , commit=False)
+                """ NO GRAD AREA """
+                with torch.no_grad():
+                    origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks = None, None, None, None, None
+                    first_L1Loss_list = []
+                    second_L1Loss_list = []
+                    second_PerceptualLoss_list = []
+                    for idx, batch_data in enumerate(val_loader):
+                        if idx == val_batch_num:
+                            break
+                        origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks = batch_data
+                        masks = masks.permute(0,3,1,2)
+                        origin_imgs, warpped_imgs = origin_imgs.to(device), warpped_imgs.to(device)
+                        masks = masks.float().to(device)
+                        img, mask = origin_imgs, (1 - masks)  # deepfillv2 0:unmask 1:mask, 跟原本 mask 0:mask, 1: unmask不一樣
+
+                        # Generator output
+                        first_out, second_out = generator(warpped_imgs, mask)
+
+                        # forward propagation
+                        first_out_wholeimg = warpped_imgs * (1 - mask) + first_out * mask        # in range [0, 1]
+                        second_out_wholeimg = warpped_imgs * (1 - mask) + second_out * mask      # in range [0, 1]
+
+                        # L1 Loss
+                        first_L1Loss = (first_out - origin_imgs).abs().mean()
+                        second_L1Loss = (second_out - origin_imgs).abs().mean()
+                        
+                        # GAN Loss
+                        # fake_scalar = discriminator(second_out_wholeimg, mask)
+                        # GAN_Loss = -torch.mean(fake_scalar)
+
+                        # Get the deep semantic feature maps, and compute Perceptual Loss
+                        origin_img_featuremaps = perceptualnet(origin_imgs)                          # feature maps
+                        second_out_featuremaps = perceptualnet(second_out)
+                        second_PerceptualLoss = L1Loss(second_out_featuremaps, origin_img_featuremaps)
+
+
+                        first_L1Loss_list.append(first_L1Loss.item())
+                        second_L1Loss_list.append(second_L1Loss.item())
+                        second_PerceptualLoss_list.append(second_PerceptualLoss.item())
+                        
+
+                        # Compute losses
+                        # loss = opt.lambda_l1 * first_L1Loss + opt.lambda_l1 * second_L1Loss + \
+                            # opt.lambda_perceptual * second_PerceptualLoss + opt.lambda_gan * GAN_Loss
+                    
+                    log_dict["val"] = {
+                            "first_Mask_L1_Loss":  np.array(first_L1Loss_list).mean(),
+                            "second_Mask_L1_Loss":  np.array(second_L1Loss_list).mean(),
+                            "Perceptual_Loss": np.array(second_PerceptualLoss_list).mean(),
+                            "epoch": epoch 
+                    }
+                    print("[VALIDATION]",log_dict["val"])
+
+                    masked_warpped = warpped_imgs * (1 - mask) + mask
+                    mask = torch.cat((mask, mask, mask), 1)    
+                    img_list = [origin_imgs, warpped_imgs, mask, masked_warpped, first_out, second_out]
+                    name_list = ['origin','warpped', 'mask', 'masked_warpped', 'first_out', 'second_out']
+                    img_path =  deepfillv2_utils.save_sample_png(sample_folder = sample_dir, sample_name = 'epoch%d' % (epoch + 1), img_list = img_list, name_list = name_list, pixel_max_cnt = 255)
+                    # print(img_path)
+                    if opt.wandb:
+                        wandb.log({"Sample_Image": wandb.Image(img_path)} , commit=False)
+            
             if opt.wandb:
-                wandb.log({} , commit=True)
+                wandb.log(log_dict, commit=True)
 
         # Learning rate decrease
         adjust_learning_rate(opt.lr_g, optimizer_g, (epoch + 1), opt)
@@ -326,8 +401,8 @@ def WGAN_trainer(opt):
 
         ### Sample data every epoch
         if (epoch + 1) % 1 == 0:
-            img_list = [img, mask, masked_img, first_out, second_out]
-            name_list = ['gt', 'mask', 'masked_img', 'first_out', 'second_out']
+            img_list = [origin_imgs, warpped_imgs, mask, masked_warpped, first_out, second_out]
+            name_list = ['origin','warpped', 'mask', 'masked_warpped', 'first_out', 'second_out']
             deepfillv2_utils.save_sample_png(sample_folder = sample_dir, sample_name = 'epoch%d' % (epoch + 1), img_list = img_list, name_list = name_list, pixel_max_cnt = 255)
 
 if __name__ == "__main__":
