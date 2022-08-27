@@ -4,7 +4,7 @@
 import os
 from get_args import get_args
 """ Setting """
-wandb_prefix_name = "deep_fillv2"
+wandb_prefix_name = "deep_fillv2_mask_warp"
 
 seed = 5
 test_size = 0.1
@@ -299,7 +299,7 @@ def WGAN_trainer(opt):
             # Compute losses
             loss = opt.lambda_l1 * first_L1Loss + opt.lambda_l1 * second_L1Loss + \
                    opt.lambda_perceptual * second_PerceptualLoss + opt.lambda_gan * GAN_Loss + \
-                   opt.mask_weight * mask_loss
+                   opt.mask_weight * mask_loss * abs(GAN_Loss) 
                    
             loss.backward()
             optimizer_g.step()
@@ -314,6 +314,8 @@ def WGAN_trainer(opt):
             log_dict = {
                 "train":{
                     "mask_loss": mask_loss.item(),
+                    "d_loss": loss_D.item(),
+                    "g_fake_loss": GAN_Loss.item(),
                     "First_L1_Loss":  first_L1Loss.item(),
                     "Second_L1_Loss": second_L1Loss.item(),
                     "Perceptual_Loss": second_PerceptualLoss.item(),
