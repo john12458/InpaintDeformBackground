@@ -228,6 +228,9 @@ def WGAN_trainer(opt):
     # Tensor type
     Tensor = torch.cuda.FloatTensor
 
+    maskimg_f = lambda mask,img : img * (1 - mask) # deepfillv2 style
+    # maskimg_f = lambda mask,img : img * mask #origin style
+
     # Training loop
     for epoch in range(opt.resume_epoch, opt.epochs):
         for batch_idx, batch_data in enumerate(train_loader):
@@ -281,7 +284,7 @@ def WGAN_trainer(opt):
             optimizer_g.zero_grad()
 
             # matt_loss
-            matt_loss = L1Loss(fake_masks * warpped_imgs, fake_masks * origin_imgs).mean()
+            matt_loss = L1Loss(maskimg_f(fake_masks, warpped_imgs),maskimg_f(fake_masks, origin_imgs) ).mean()
 
             # Mask Loss
             mask_loss = L1Loss(fake_masks, gt_masks).mean()
@@ -302,9 +305,8 @@ def WGAN_trainer(opt):
             # Compute losses
             loss = opt.lambda_l1 * first_L1Loss + opt.lambda_l1 * second_L1Loss + \
                    opt.lambda_perceptual * second_PerceptualLoss + opt.lambda_gan * GAN_Loss + \
-                   opt.mask_weight * mask_loss * abs(GAN_Loss)  + \
-                   opt.matt_weight * matt_loss * abs(GAN_Loss)
-                   
+                   opt.mask_weight * mask_loss + \
+                   opt.matt_weight * matt_loss                    
             loss.backward()
             optimizer_g.step()
 
