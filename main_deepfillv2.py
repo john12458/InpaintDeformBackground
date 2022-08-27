@@ -280,6 +280,9 @@ def WGAN_trainer(opt):
             ### Train Generator
             optimizer_g.zero_grad()
 
+            # matt_loss
+            matt_loss = L1Loss(fake_masks * warpped_imgs, fake_masks * origin_imgs).mean()
+
             # Mask Loss
             mask_loss = L1Loss(fake_masks, gt_masks).mean()
 
@@ -299,7 +302,8 @@ def WGAN_trainer(opt):
             # Compute losses
             loss = opt.lambda_l1 * first_L1Loss + opt.lambda_l1 * second_L1Loss + \
                    opt.lambda_perceptual * second_PerceptualLoss + opt.lambda_gan * GAN_Loss + \
-                   opt.mask_weight * mask_loss * abs(GAN_Loss) 
+                   opt.mask_weight * mask_loss * abs(GAN_Loss)  + \
+                   opt.matt_weight * matt_loss * abs(GAN_Loss)
                    
             loss.backward()
             optimizer_g.step()
@@ -313,6 +317,7 @@ def WGAN_trainer(opt):
             """ LOG """
             log_dict = {
                 "train":{
+                    "matt_loss": matt_loss.item(),
                     "mask_loss": mask_loss.item(),
                     "d_loss": loss_D.item(),
                     "g_fake_loss": GAN_Loss.item(),
