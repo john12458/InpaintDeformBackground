@@ -228,7 +228,7 @@ def WGAN_trainer(opt):
     # Tensor type
     Tensor = torch.cuda.FloatTensor
 
-    maskimg_f = lambda mask,img : img * (1 - mask) # deepfillv2 style
+    maskimg_f = lambda mask,img : img * (1 - mask) + mask # deepfillv2 style
     # maskimg_f = lambda mask,img : img * mask #origin style
 
     # Training loop
@@ -249,12 +249,10 @@ def WGAN_trainer(opt):
             gt_masks =  (1 - masks) # deepfillv2 0:unmask 1:mask, 跟原本 mask 0:mask, 1: unmask不一樣
 
             # LSGAN vectors
-            valid = Tensor(np.ones((warpped_imgs.shape[0], 1, opt.imgsize//32, opt.imgsize//32)))
-            fake = Tensor(np.zeros((warpped_imgs.shape[0], 1, opt.imgsize//32, opt.imgsize//32)))
-            zero = Tensor(np.zeros((warpped_imgs.shape[0], 1, opt.imgsize//32, opt.imgsize//32)))
-            # valid = Tensor(np.ones((img.shape[0], 1, height[0]//32, width[0]//32)))
-            # fake = Tensor(np.zeros((img.shape[0], 1, height[0]//32, width[0]//32)))
-            # zero = Tensor(np.zeros((img.shape[0], 1, height[0]//32, width[0]//32)))
+            # valid = Tensor(np.ones((warpped_imgs.shape[0], 1, opt.imgsize//32, opt.imgsize//32)))
+            # fake = Tensor(np.zeros((warpped_imgs.shape[0], 1, opt.imgsize//32, opt.imgsize//32)))
+            # zero = Tensor(np.zeros((warpped_imgs.shape[0], 1, opt.imgsize//32, opt.imgsize//32)))
+            
 
             ### Train Discriminator
             optimizer_d.zero_grad()
@@ -273,11 +271,13 @@ def WGAN_trainer(opt):
 
             
             # Loss and optimize
-            loss_fake = -torch.mean(torch.min(zero, -valid-fake_scalar))
-            loss_true = -torch.mean(torch.min(zero, -valid+true_scalar))
-            # Overall Loss and optimize
-            loss_D = 0.5 * (loss_fake + loss_true)
+            # loss_fake = -torch.mean(torch.min(zero, -valid-fake_scalar))
+            # loss_true = -torch.mean(torch.min(zero, -valid+true_scalar))
+            # # Overall Loss and optimize
+            # loss_D = 0.5 * (loss_fake + loss_true)
+            loss_D = - torch.mean(true_scalar) + torch.mean(fake_scalar)
             loss_D.backward()
+            
             optimizer_d.step()
 
             ### Train Generator
