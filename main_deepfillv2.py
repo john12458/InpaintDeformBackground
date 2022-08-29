@@ -48,9 +48,9 @@ def WGAN_trainer(opt):
     # ----------------------------------------
     #      Initialize training parameters
     # ----------------------------------------
+   
 
-    # cudnn benchmark accelerates the network
-    cudnn.benchmark = opt.cudnn_benchmark
+    
     """ Wandb"""
     if opt.wandb:
         import wandb
@@ -58,8 +58,13 @@ def WGAN_trainer(opt):
         opt.log_dir = f"{opt.log_dir}/{wandb.run.id}/"
         wandb.config.update(opt)
         wandb.run.name = f"{wandb_prefix_name}_{wandb.run.name}"
-        
     print(vars(opt))
+    # seed every
+    print("Seed:",seed)
+    seed_everything(seed)
+
+    # cudnn benchmark accelerates the network
+    cudnn.benchmark = opt.cudnn_benchmark
 
     """ result dir setting """
     checkpoint_dir = opt.log_dir + "/ckpts/"
@@ -76,8 +81,11 @@ def WGAN_trainer(opt):
     print('Generator is created!')
     network.weights_init(generator, init_type = opt.init_type, init_gain = opt.init_gain)
     print('Initialize generator with %s type' % opt.init_type)
-    print("load MG weight...")
-    ckpt_path = '/workspace/inpaint_mask/log/warp_mask/w8pf2sq2/ckpts/ckpt_9001_3.pt'
+    
+    ckpt_path = '/workspace/inpaint_mask/log/warp_mask/1mm6trhc/ckpts/ckpt_3001_4.pt'
+    if 'celeba' in opt.data_dir:
+        ckpt_path = '/workspace/inpaint_mask/log/warp_mask/w8pf2sq2/ckpts/ckpt_9001_3.pt'
+    print(f"load MG weight from {ckpt_path}")
     origin_weight = torch.load(ckpt_path)['G_state_dict']
     mg_weight = {}
     for k,v in origin_weight.items():
