@@ -43,7 +43,7 @@ from natsort import natsorted
 from sklearn.model_selection import train_test_split
 import timm
 
-# 雖然寫WGAN 但我看起來像LSGAN...
+# 雖然寫WGAN 但我看起來像LSGAN... 先把loss 改成 WGAN
 def WGAN_trainer(opt):
     # ----------------------------------------
     #      Initialize training parameters
@@ -71,10 +71,30 @@ def WGAN_trainer(opt):
 
     """ Models """
     # Generator
-    generator = Generator_deepfillv2(image_size, opt)
+    mask_process_f = lambda mask: (mask - 1).abs()
+    generator = Generator_deepfillv2(mask_process_f, image_size, opt)
     print('Generator is created!')
     network.weights_init(generator, init_type = opt.init_type, init_gain = opt.init_gain)
     print('Initialize generator with %s type' % opt.init_type)
+    print("load MG weight...")
+    ckpt_path = '/workspace/inpaint_mask/log/warp_mask/w8pf2sq2/ckpts/ckpt_9001_3.pt'
+    origin_weight = torch.load(ckpt_path)['G_state_dict']
+    mg_weight = {}
+    for k,v in origin_weight.items():
+        if "MG" in k :
+            # sub_key = k.split('MG.')[-1]
+            mg_weight[k] = v
+    model_dict = generator.state_dict()
+    mg_weight = {k: v for k, v in mg_weight.items() if k in model_dict}
+    assert len(mg_weight.keys()) != 0, print("Error, numbers of update keys are zero")
+    print(mg_weight.keys())
+    model_dict.update(mg_weight)
+    generator.load_state_dict(model_dict)
+    print("Freeze Mask estimator")
+    for param in generator.MG.parameters():
+        param.requires_grad = False
+    
+   
     # Discrimnator
     discriminator = network.PatchDiscriminator(opt)
     print('Discriminator is created!')
@@ -231,6 +251,8 @@ def WGAN_trainer(opt):
     maskimg_f = lambda mask,img : img * (1 - mask) + mask # deepfillv2 style
     # maskimg_f = lambda mask,img : img * mask #origin style
 
+    weight_cliping_limit = 0.01
+
     # Training loop
     for epoch in range(opt.resume_epoch, opt.epochs):
         for batch_idx, batch_data in enumerate(train_loader):
@@ -254,20 +276,21 @@ def WGAN_trainer(opt):
             # zero = Tensor(np.zeros((warpped_imgs.shape[0], 1, opt.imgsize//32, opt.imgsize//32)))
             
 
-            ### Train Discriminator
+            """ Train Discriminator """
             optimizer_d.zero_grad()
 
             # Generator output
             first_out, second_out, fake_masks = generator(warpped_imgs)
+            fake_masks = fake_masks.detach()
 
             # forward propagation
             first_out_wholeimg = warpped_imgs * (1 - fake_masks) + first_out * fake_masks        # in range [0, 1]
             second_out_wholeimg = warpped_imgs * (1 - fake_masks) + second_out * fake_masks      # in range [0, 1]
 
             # Fake samples
-            fake_scalar = discriminator(second_out_wholeimg.detach(), fake_masks.detach())
+            fake_scalar = discriminator(second_out_wholeimg.detach(), fake_masks)
             # True samples
-            true_scalar = discriminator(origin_imgs, fake_masks.detach())
+            true_scalar = discriminator(origin_imgs, fake_masks)
 
             
             # Loss and optimize
@@ -277,11 +300,18 @@ def WGAN_trainer(opt):
             # loss_D = 0.5 * (loss_fake + loss_true)
             loss_D = - torch.mean(true_scalar) + torch.mean(fake_scalar)
             loss_D.backward()
-            
+            torch.nn.utils.clip_grad_value_(discriminator.parameters(), weight_cliping_limit)
             optimizer_d.step()
 
-            ### Train Generator
+            """ Train Generator """
             optimizer_g.zero_grad()
+            # # --- Copy again from discrimnator part
+            # # Generator output
+            # first_out, second_out, fake_masks = generator(warpped_imgs)
+            # # forward propagation
+            # first_out_wholeimg = warpped_imgs * (1 - fake_masks) + first_out * fake_masks        # in range [0, 1]
+            # second_out_wholeimg = warpped_imgs * (1 - fake_masks) + second_out * fake_masks      # in range [0, 1]
+            # # ---
 
             # matt_loss
             matt_loss = L1Loss(maskimg_f(fake_masks, warpped_imgs),maskimg_f(fake_masks, origin_imgs) ).mean()

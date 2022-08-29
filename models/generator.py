@@ -5,14 +5,16 @@ from .generators.inpaint_generator import InpaintGenerator
 from .deepfillv2.network import GatedGenerator
 class Generator_deepfillv2(nn.Module):
     
-    def __init__(self, image_size, opt):
+    def __init__(self, mask_process_f, image_size, opt):
         super().__init__()
         self.MG = MaskEstimator(image_size = image_size, backbone = opt.backbone)
+        self.mask_process_f = mask_process_f
         self.IG = GatedGenerator(opt)
    
     def forward(self, x):
         batch_size = x.shape[0]
         fake_masks = self.MG(x)
+        fake_masks = self.mask_process_f(fake_masks)
         first_out, second_out= self.IG(x, fake_masks)
         return first_out, second_out, fake_masks
 
