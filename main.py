@@ -34,7 +34,7 @@ weight_cliping_limit = 0.01
 
 # assert args.D_iter > args.G_iter,print("WGAN Need D_iter > G_iter") # wgan parameters
 
-
+from losses.SegLoss.losses_pytorch.dice_loss import GDiceLossV2
 import torch
 import numpy as np
 from tqdm.auto import tqdm
@@ -159,6 +159,9 @@ optimizer_D = torch.optim.Adam(D.parameters(), lr=args.lr,betas=(0.5,0.99))
 """ Loss function """
 # adversarial_loss= nn.BCELoss()
 l1_loss_f = torch.nn.L1Loss()
+gDiceLoss = GDiceLossV2()
+gdice_loss = lambda f, t : gDiceLoss(f.unsqueeze(-1),t.unsqueeze(-1))
+
 
 
 # In[54]:
@@ -180,7 +183,7 @@ with tqdm(total= total_steps) as pgbars:
             masks = masks.permute(0,3,1,2)
             # print("masks",masks.shape)
             origin_imgs, warpped_imgs = origin_imgs.to(device), warpped_imgs.to(device)
-            masks = masks.to(device)
+            masks = masks.float().to(device)
 
             origin_list = origin_imgs.reshape((args.D_iter,-1,3,image_size[0],image_size[1]))
             warpped_list = warpped_imgs.reshape((args.D_iter,-1,3,image_size[0],image_size[1]))
@@ -247,10 +250,11 @@ with tqdm(total= total_steps) as pgbars:
                 
                 # mask_loss 
                 mask_loss, in_area_mask_loss, out_area_mask_loss = torch.zeros(1), torch.zeros(1), torch.zeros(1) 
-                if args.in_out_area_split:
-                    mask_loss, in_area_mask_loss, out_area_mask_loss = calculate_mask_loss_with_split(gt_masks, fake_masks, args.in_area_weight, args.out_area_weight, l1_loss_f)
-                else:
-                    mask_loss = l1_loss_f(fake_masks, gt_masks).mean()
+                mask_loss = gdice_loss(fake_masks, gt_masks)
+                # if args.in_out_area_split:
+                #     mask_loss, in_area_mask_loss, out_area_mask_loss = calculate_mask_loss_with_split(gt_masks, fake_masks, args.in_area_weight, args.out_area_weight, l1_loss_f)
+                # else:
+                #     mask_loss = l1_loss_f(fake_masks, gt_masks).mean()
 
                 # genreator loss
                 # g_loss = - fake_loss + l1_loss * abs(fake_loss) + matt_loss + mask_loss
@@ -320,7 +324,7 @@ with tqdm(total= total_steps) as pgbars:
                         origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks = batch_data
                         masks = masks.permute(0,3,1,2)
                         origin_imgs, warpped_imgs = origin_imgs.to(device), warpped_imgs.to(device)
-                        masks = masks.to(device)
+                        masks = masks.float().to(device)
                         
                         origin,warpped = origin_imgs, warpped_imgs
                         gt_masks = masks
@@ -341,10 +345,11 @@ with tqdm(total= total_steps) as pgbars:
 
                         # mask_loss 
                         mask_loss, in_area_mask_loss, out_area_mask_loss = torch.zeros(1), torch.zeros(1), torch.zeros(1) 
-                        if args.in_out_area_split:
-                            mask_loss, in_area_mask_loss, out_area_mask_loss = calculate_mask_loss_with_split(gt_masks, fake_masks, args.in_area_weight, args.out_area_weight, l1_loss_f)
-                        else:
-                            mask_loss = l1_loss_f(fake_masks, gt_masks).mean()
+                        mask_loss = gdice_loss(fake_masks, gt_masks)
+                        # if args.in_out_area_split:
+                        #     mask_loss, in_area_mask_loss, out_area_mask_loss = calculate_mask_loss_with_split(gt_masks, fake_masks, args.in_area_weight, args.out_area_weight, l1_loss_f)
+                        # else:
+                        #     mask_loss = l1_loss_f(fake_masks, gt_masks).mean()
 
                         # genreator loss
                         # g_loss = - fake_loss + l1_loss * abs(fake_loss) + matt_loss + mask_loss
