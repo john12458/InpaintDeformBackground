@@ -4,7 +4,7 @@ import os
 """ Setting """
 os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 wandb_prefix_name = "warp_mask"
-know_args = ['--note',"Try to small gird varmap (8x8)",
+know_args = ['--note',"Polyloss",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
              "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
@@ -34,7 +34,8 @@ weight_cliping_limit = 0.01
 
 # assert args.D_iter > args.G_iter,print("WGAN Need D_iter > G_iter") # wgan parameters
 
-from losses.SegLoss.losses_pytorch.dice_loss import GDiceLossV2
+# from losses.SegLoss.losses_pytorch.dice_loss import GDiceLossV2
+from losses.poly_loss import PolyLoss 
 import torch
 import numpy as np
 from tqdm.auto import tqdm
@@ -157,10 +158,9 @@ optimizer_G = torch.optim.Adam(G.parameters(), lr=args.lr,betas=(0.5,0.99))
 optimizer_D = torch.optim.Adam(D.parameters(), lr=args.lr,betas=(0.5,0.99))
 
 """ Loss function """
-# adversarial_loss= nn.BCELoss()
 l1_loss_f = torch.nn.L1Loss()
-gDiceLoss = GDiceLossV2()
-gdice_loss = lambda f, t : gDiceLoss(f.unsqueeze(-1),t.unsqueeze(-1))
+ployloss_f = PolyLoss(softmax=False)
+
 
 
 
@@ -250,7 +250,7 @@ with tqdm(total= total_steps) as pgbars:
                 
                 # mask_loss 
                 mask_loss, in_area_mask_loss, out_area_mask_loss = torch.zeros(1), torch.zeros(1), torch.zeros(1) 
-                mask_loss = gdice_loss(fake_masks, gt_masks)
+                mask_loss = ployloss_f(fake_masks, gt_masks)
                 # if args.in_out_area_split:
                 #     mask_loss, in_area_mask_loss, out_area_mask_loss = calculate_mask_loss_with_split(gt_masks, fake_masks, args.in_area_weight, args.out_area_weight, l1_loss_f)
                 # else:
@@ -345,7 +345,7 @@ with tqdm(total= total_steps) as pgbars:
 
                         # mask_loss 
                         mask_loss, in_area_mask_loss, out_area_mask_loss = torch.zeros(1), torch.zeros(1), torch.zeros(1) 
-                        mask_loss = gdice_loss(fake_masks, gt_masks)
+                        mask_loss = ployloss_f(fake_masks, gt_masks)
                         # if args.in_out_area_split:
                         #     mask_loss, in_area_mask_loss, out_area_mask_loss = calculate_mask_loss_with_split(gt_masks, fake_masks, args.in_area_weight, args.out_area_weight, l1_loss_f)
                         # else:
