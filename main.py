@@ -2,9 +2,9 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 wandb_prefix_name = "warp_mask"
-know_args = ['--note',"Polyloss",
+know_args = ['--note',"bmse_loss with varmap",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
              "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
@@ -28,14 +28,18 @@ image_size = (256,256)
 # image_size = (512,512)
 seed = 5
 test_size = 0.1
-val_batch_num = 5
+val_batch_num = 6
 device = "cuda"
 weight_cliping_limit = 0.01
 
 # assert args.D_iter > args.G_iter,print("WGAN Need D_iter > G_iter") # wgan parameters
 
-# from losses.SegLoss.losses_pytorch.dice_loss import GDiceLossV2
-from losses.poly_loss import PolyLoss 
+# from losses.SegLoss.losses_pytorch.ND_Crossentropy import CrossentropyND
+# from losses.SegLoss.losses_pytorch.dice_loss import SoftDiceLoss
+
+# from losses.bl1_loss import BalancedL1Loss
+from metric import BinaryMetrics 
+from losses.poly_loss import PolyBCELoss 
 import torch
 import numpy as np
 from tqdm.auto import tqdm
@@ -159,8 +163,15 @@ optimizer_D = torch.optim.Adam(D.parameters(), lr=args.lr,betas=(0.5,0.99))
 
 """ Loss function """
 l1_loss_f = torch.nn.L1Loss()
-ployloss_f = PolyLoss(softmax=False)
-
+# smoothL1Loss = torch.nn.SmoothL1Loss()
+poly_bce_loss = PolyBCELoss()
+# dice_f = SoftDiceLoss()
+# ce_f = CrossentropyND()
+# mask_loss_f = lambda x,y : dice_f(x,y)+ ce_f(x,y)
+# mask_loss_f = lambda x,y,var : poly_loss(x,y,var)
+mask_loss_f = lambda pred,gt,var : poly_bce_loss(pred,gt,var)
+# mask_loss_f = PolyLoss()
+metric_f = BinaryMetrics(activation= None) # mask-estimator had use sigmoid
 
 
 
@@ -179,15 +190,20 @@ with tqdm(total= total_steps) as pgbars:
             D.train()
             
             # origin_imgs, warpped_imgs = batch_data
-            origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks = batch_data
+            origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks, varmap = batch_data
+            
+            varmap = varmap.permute(0,3,1,2)
             masks = masks.permute(0,3,1,2)
-            # print("masks",masks.shape)
+
             origin_imgs, warpped_imgs = origin_imgs.to(device), warpped_imgs.to(device)
             masks = masks.float().to(device)
+            varmap = varmap.float().to(device)
+
 
             origin_list = origin_imgs.reshape((args.D_iter,-1,3,image_size[0],image_size[1]))
             warpped_list = warpped_imgs.reshape((args.D_iter,-1,3,image_size[0],image_size[1]))
             masks_list = masks.reshape((args.D_iter,-1,1,image_size[0],image_size[1]))
+            varmap_list = varmap.reshape((args.D_iter,-1,1,image_size[0],image_size[1]))
             
             
             
@@ -236,6 +252,8 @@ with tqdm(total= total_steps) as pgbars:
                 assert origin.shape == (args.batch_size,3,image_size[0],image_size[1])
                 assert warpped.shape == (args.batch_size,3,image_size[0],image_size[1])
                 assert gt_masks.shape == (args.batch_size,1,image_size[0],image_size[1])
+                gt_varmap = varmap_list[i]
+                assert gt_varmap.shape == (args.batch_size,1,image_size[0],image_size[1])
                 
                 # fake_loss
                 fake_images, fake_masks = G(warpped)
@@ -250,7 +268,7 @@ with tqdm(total= total_steps) as pgbars:
                 
                 # mask_loss 
                 mask_loss, in_area_mask_loss, out_area_mask_loss = torch.zeros(1), torch.zeros(1), torch.zeros(1) 
-                mask_loss = ployloss_f(fake_masks, gt_masks)
+                mask_loss = mask_loss_f(fake_masks, gt_masks, gt_varmap)
                 # if args.in_out_area_split:
                 #     mask_loss, in_area_mask_loss, out_area_mask_loss = calculate_mask_loss_with_split(gt_masks, fake_masks, args.in_area_weight, args.out_area_weight, l1_loss_f)
                 # else:
@@ -261,6 +279,10 @@ with tqdm(total= total_steps) as pgbars:
                 g_loss = - fake_loss + ( l1_loss + 100*matt_loss + mask_loss) * abs(fake_loss) 
                 g_loss.backward()
                 optimizer_G.step()
+
+                # metric
+                mask_l1_metric = l1_loss_f(fake_masks, gt_masks).mean()
+                pixel_acc, dice, precision, specificity, recall = metric_f(gt_masks, fake_masks)
 
 
             """ LOG """
@@ -275,7 +297,15 @@ with tqdm(total= total_steps) as pgbars:
                     "mask_loss": mask_loss.item(),
                     "in_area_mask_loss": in_area_mask_loss.item(),
                     "out_area_mask_loss": out_area_mask_loss.item(),
-                    "Wasserstein_D":Wasserstein_D.item()
+                    "Wasserstein_D":Wasserstein_D.item(),
+                    "metric":{
+                        "pixel_acc":pixel_acc,  
+                        "dice":dice, 
+                        "precision":precision, 
+                        "specificity":specificity,
+                        "recall":recall
+                    }
+                    
                 },
                 # "val":{}
             }
@@ -305,6 +335,7 @@ with tqdm(total= total_steps) as pgbars:
                 origin,warpped,fake_images,fake_masks,gt_masks = None,None,None,None,None
                 """ Validation """
                 if np.mod(step, 100) == 1:
+                    val_metrics = []
                     val_g_loss = []
                     val_fake_loss = []
                     val_matt_loss = []
@@ -321,16 +352,23 @@ with tqdm(total= total_steps) as pgbars:
                     # for _ in range(1):
                         # batch_data = next(iter(val_loader))
                     
-                        origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks = batch_data
+                        origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks, varmap = batch_data
+            
+                        varmap = varmap.permute(0,3,1,2)
                         masks = masks.permute(0,3,1,2)
+
                         origin_imgs, warpped_imgs = origin_imgs.to(device), warpped_imgs.to(device)
                         masks = masks.float().to(device)
+                        varmap = varmap.float().to(device)
+
                         
                         origin,warpped = origin_imgs, warpped_imgs
                         gt_masks = masks
                         assert origin.shape == (args.batch_size,3,image_size[0],image_size[1])
                         assert warpped.shape == (args.batch_size,3,image_size[0],image_size[1])
                         assert gt_masks.shape == (args.batch_size,1,image_size[0],image_size[1])
+                        gt_varmap = varmap
+                        assert gt_varmap.shape == (args.batch_size,1,image_size[0],image_size[1])
                         
                         # fake_loss
                         fake_images, fake_masks = G(warpped)
@@ -345,7 +383,7 @@ with tqdm(total= total_steps) as pgbars:
 
                         # mask_loss 
                         mask_loss, in_area_mask_loss, out_area_mask_loss = torch.zeros(1), torch.zeros(1), torch.zeros(1) 
-                        mask_loss = ployloss_f(fake_masks, gt_masks)
+                        mask_loss = mask_loss_f(fake_masks, gt_masks, gt_varmap)
                         # if args.in_out_area_split:
                         #     mask_loss, in_area_mask_loss, out_area_mask_loss = calculate_mask_loss_with_split(gt_masks, fake_masks, args.in_area_weight, args.out_area_weight, l1_loss_f)
                         # else:
@@ -356,6 +394,10 @@ with tqdm(total= total_steps) as pgbars:
                         g_loss = (- 1 + l1_loss + 100*matt_loss + args.mask_weight*mask_loss) * abs(fake_loss) 
                         
                         
+                        # val_mask_l1_metric.append( l1_loss_f(fake_masks, gt_masks).mean().item() )
+                        val_metric = metric_f(gt_masks, fake_masks)
+                        val_metrics.append(val_metric)
+
                         val_fake_loss.append(fake_loss.item())
                         val_l1_loss.append(l1_loss.item())
                         val_matt_loss.append(matt_loss.item())
@@ -364,7 +406,9 @@ with tqdm(total= total_steps) as pgbars:
                         val_out_area_mask_loss.append(out_area_mask_loss.item())
                         val_g_loss.append(g_loss.item())
 
-                    
+                    val_metrics = np.array(val_metrics).mean(axis = 0)
+                    pixel_acc, dice, precision, specificity, recall = val_metrics
+
                     # print("np.array(val_mask_loss)",np.array(val_mask_loss).shape)
                     log_dict["val"] ={
                         "g_loss": np.array(val_g_loss).mean(),
@@ -373,7 +417,14 @@ with tqdm(total= total_steps) as pgbars:
                         "matt_loss":  np.array(val_matt_loss).mean(),
                         "mask_loss": np.array(val_mask_loss).mean(),
                         "in_area_mask_loss": np.array(val_in_area_mask_loss).mean(),
-                        "out_area_mask_loss": np.array(val_out_area_mask_loss).mean()
+                        "out_area_mask_loss": np.array(val_out_area_mask_loss).mean(),
+                        "metric":{
+                            "pixel_acc":pixel_acc,  
+                            "dice":dice, 
+                            "precision":precision, 
+                            "specificity":specificity,
+                            "recall":recall
+                        }
                     }
                     
                     # print("log_dict[val]",log_dict["val"])
@@ -383,7 +434,7 @@ with tqdm(total= total_steps) as pgbars:
                     # to_pillow_f(fake_images[k]).save(img_path)
 
                     # plot result
-                    fig, axs = plt.subplots(1, 6, figsize=(32,8))
+                    fig, axs = plt.subplots(1, 7, figsize=(32,8))
                     axs[0].set_title('origin')
                     axs[0].imshow( to_pillow_f(origin[k]) )
                     
@@ -403,6 +454,9 @@ with tqdm(total= total_steps) as pgbars:
 
                     axs[5].set_title('GTMask on warpped')
                     axs[5].imshow( to_pillow_f(gt_masks[k]*warpped[k]))
+
+                    axs[6].set_title('inv_varmap')
+                    axs[6].imshow( to_pillow_f(1 - varmap[k]),vmin=0, vmax=255, cmap='gray' )
 
                     fig.savefig(img_path) 
                     plt.close(fig)

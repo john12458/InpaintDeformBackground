@@ -98,7 +98,7 @@ class PolyBCELoss(_Loss):
         self.reduction = reduction
         self.epsilon = epsilon
         self.bce = nn.BCEWithLogitsLoss(reduction='none')
-    def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    def forward(self, input: torch.Tensor, target: torch.Tensor, var_map: torch.Tensor) -> torch.Tensor:
         """
         Args:
             input: (∗), where * means any number of dimensions.
@@ -108,11 +108,12 @@ class PolyBCELoss(_Loss):
             ValueError: When ``self.reduction`` is not one of ["mean", "sum", "none"].
        """
         
-            # # target is in the one-hot format, convert to BH[WD] format to calculate ce loss
+        # # target is in the one-hot format, convert to BH[WD] format to calculate ce loss
         self.bce_loss = self.bce(input, target)
-        pt = torch.sigmoid(input) 
+        pt = input # torch.sigmoid(input) 
         pt = torch.where(target ==1,pt,1-pt)
-        poly_loss = self.bce_loss + self.epsilon * (1 - pt)
+        poly_loss = self.bce_loss + self.epsilon * (1 - pt) 
+        poly_loss *= var_map
 
         if self.reduction == 'mean':
             polyl = torch.mean(poly_loss)  # the batch and channel average

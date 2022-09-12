@@ -80,7 +80,7 @@ class WarppedDataset(torch.utils.data.Dataset):
                 return data_utils.warp_image(tri_varmap, mesh_pts, mesh_tran_pts, image_size)
             elif self.varmap_type == "small_grid":
                 mesh_size_for_varmap = 8 
-                src_image = np.array(origin)
+                src_image = np.array(warpped)
                 image_size = (src_image.shape[0], src_image.shape[1])
                 mesh_for_varmap = data_utils.create_mesh(image_size= image_size, mesh_size = mesh_size_for_varmap)
                 small_grid_varmap = data_utils.get_var_map(src_image,mesh_for_varmap)
@@ -124,6 +124,6 @@ class WarppedDataset(torch.utils.data.Dataset):
       
         
         if self.return_mesh:
-            return origin, warpped, mesh_pts, mesh_tran_pts, mask
+            return origin, warpped, mesh_pts, mesh_tran_pts, mask, varmap
         else:
             return origin, warpped, mask

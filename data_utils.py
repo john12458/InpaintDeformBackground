@@ -6,8 +6,8 @@ import scipy.spatial as spatial
 def create_mesh(image_size,mesh_size: int):
     assert len(image_size) == 2, print("image_size len must be 2", len(image_size))
     # Create Mesh
-    x = np.linspace(2,  image_size[0]-2, image_size[0]//mesh_size)
-    y = np.linspace(2,  image_size[1]-2, image_size[1]//mesh_size)
+    x = np.linspace(0,  image_size[0], image_size[0]//mesh_size)
+    y = np.linspace(0,  image_size[1], image_size[1]//mesh_size)
     # x = np.linspace(self.mesh_size,  image_size[0]-self.mesh_size, image_size[0]//self.mesh_size)
     # y = np.linspace(self.mesh_size,  image_size[1]-self.mesh_size, image_size[1]//self.mesh_size)
     xv, yv = np.meshgrid( y,x)
@@ -105,16 +105,25 @@ def warp_image(src_img, src_points, dest_points, dest_shape, dtype=np.uint8):
 
     return result_img
 
+def rgb2gray(rgb):
+    r, g, b = rgb[:,:,0], rgb[:,:,1], rgb[:,:,2]
+    gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
+    return gray
+
 def get_var_map(img,mesh):
+    img = rgb2gray(img)[...,np.newaxis]
     var_map = np.zeros((img.shape[0],img.shape[1],1))
     for x in range(mesh.shape[1]-1):
         for y in range(mesh.shape[2]-1):
             start_x,start_y = mesh[:,x,y]
             end_x,end_y = mesh[:,x+1,y+1]
             
-            gird = img[start_y:end_y,start_x:end_x,:]
-            grid_var = np.var(gird,keepdims=False)
+            grid = img[start_y:end_y,start_x:end_x,:]
+            grid_var = np.var(grid)
             var_map[start_y:end_y,start_x:end_x,:] =  grid_var
+    # normalize
+    var_map = (var_map - var_map.min()) / (var_map.mean() - var_map.min())
+    var_map = np.clip(var_map, 0, 1)
     return var_map
 
 def get_tri_varmap(img,mesh_pts):
@@ -141,10 +150,12 @@ def get_tri_varmap(img,mesh_pts):
 def mix_mask_var(mask,varmap,threshold):
     # inverse mask to only select mask area
     inv_mask = np.abs(mask - 1)
-    mask_varmap = inv_mask * varmap
+    mask_varmap = inv_mask.squeeze() * varmap.squeeze()
+    mask_varmap = mask_varmap.reshape(mask.shape)
+    
 
     # normalize
-    mask_varmap = mask_varmap/mask_varmap.max()
+    # mask_varmap = mask_varmap/mask_varmap.max()
     
     # inverse mask_varmap (is the truthly result varmap)
     # make mask_area --> 0, unmask --> 1
