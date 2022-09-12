@@ -2,9 +2,9 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 wandb_prefix_name = "warp_mask"
-know_args = ['--note',"bmse_loss with varmap",
+know_args = ['--note',"Poly_varmap_only_epsilon",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
              "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
@@ -38,6 +38,7 @@ weight_cliping_limit = 0.01
 # from losses.SegLoss.losses_pytorch.dice_loss import SoftDiceLoss
 
 # from losses.bl1_loss import BalancedL1Loss
+# from losses.bmse_loss import BMCLossMD
 from metric import BinaryMetrics 
 from losses.poly_loss import PolyBCELoss 
 import torch
@@ -164,11 +165,16 @@ optimizer_D = torch.optim.Adam(D.parameters(), lr=args.lr,betas=(0.5,0.99))
 """ Loss function """
 l1_loss_f = torch.nn.L1Loss()
 # smoothL1Loss = torch.nn.SmoothL1Loss()
+# init_noise_sigma = 1.5
+# bmc_loss = BMCLossMD(init_noise_sigma)
+# bmc_loss.to(device)
+# optimizer_G.add_param_group({'params': bmc_loss.parameters(), 'lr': 0.01})
 poly_bce_loss = PolyBCELoss()
 # dice_f = SoftDiceLoss()
 # ce_f = CrossentropyND()
 # mask_loss_f = lambda x,y : dice_f(x,y)+ ce_f(x,y)
 # mask_loss_f = lambda x,y,var : poly_loss(x,y,var)
+# balanced_l1_loss = BalancedL1Loss()
 mask_loss_f = lambda pred,gt,var : poly_bce_loss(pred,gt,var)
 # mask_loss_f = PolyLoss()
 metric_f = BinaryMetrics(activation= None) # mask-estimator had use sigmoid
@@ -281,7 +287,6 @@ with tqdm(total= total_steps) as pgbars:
                 optimizer_G.step()
 
                 # metric
-                mask_l1_metric = l1_loss_f(fake_masks, gt_masks).mean()
                 pixel_acc, dice, precision, specificity, recall = metric_f(gt_masks, fake_masks)
 
 

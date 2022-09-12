@@ -112,8 +112,8 @@ class PolyBCELoss(_Loss):
         self.bce_loss = self.bce(input, target)
         pt = input # torch.sigmoid(input) 
         pt = torch.where(target ==1,pt,1-pt)
-        poly_loss = self.bce_loss + self.epsilon * (1 - pt) 
-        poly_loss *= var_map
+        poly_loss = self.bce_loss + self.epsilon * (1 - pt) * var_map
+        # poly_loss *= var_map
 
         if self.reduction == 'mean':
             polyl = torch.mean(poly_loss)  # the batch and channel average
