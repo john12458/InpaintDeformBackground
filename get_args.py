@@ -32,6 +32,8 @@ def get_args(know_args=None):
     parser.add_argument('--gp_lambda', dest='gp_lambda', type=int, default=10, help='Gradient penalty lambda hyperparameter')
     
     parser.add_argument('--mask_weight', dest='mask_weight', type=float, default=1.0, help='weight of mask_loss')
+    parser.add_argument('--matt_weight', dest='matt_weight', type=float, default=100.0, help='weight of matt_loss')
+    parser.add_argument('--regularzation_weight', dest='regularzation_weight', type=float, default=0.05, help='weight of regularzation')
 
     parser.add_argument('--in_out_area_split', dest='in_out_area_split',default=False, action="store_true", help='split to in_area_mask_loss and out_area_mask_loss')
     parser.add_argument('--in_area_weight', dest='in_area_weight', type=float, default=0.5, help='in_area_mask weight')
