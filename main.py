@@ -4,7 +4,7 @@ import os
 """ Setting """
 os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 wandb_prefix_name = "warp_mask"
-know_args = ['--note',"Poly_varmap_only_epsilon",
+know_args = ['--note',"BalancedL1Loss + regularzation_term 0.05",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
              "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
@@ -35,9 +35,9 @@ weight_cliping_limit = 0.01
 # assert args.D_iter > args.G_iter,print("WGAN Need D_iter > G_iter") # wgan parameters
 
 # from losses.SegLoss.losses_pytorch.ND_Crossentropy import CrossentropyND
-# from losses.SegLoss.losses_pytorch.dice_loss import SoftDiceLoss
+from losses.SegLoss.losses_pytorch.dice_loss import IoULoss
 
-# from losses.bl1_loss import BalancedL1Loss
+from losses.bl1_loss import BalancedL1Loss
 # from losses.bmse_loss import BMCLossMD
 from metric import BinaryMetrics 
 from losses.poly_loss import PolyBCELoss 
@@ -169,13 +169,19 @@ l1_loss_f = torch.nn.L1Loss()
 # bmc_loss = BMCLossMD(init_noise_sigma)
 # bmc_loss.to(device)
 # optimizer_G.add_param_group({'params': bmc_loss.parameters(), 'lr': 0.01})
-poly_bce_loss = PolyBCELoss()
+# poly_bce_loss = PolyBCELoss()
 # dice_f = SoftDiceLoss()
 # ce_f = CrossentropyND()
 # mask_loss_f = lambda x,y : dice_f(x,y)+ ce_f(x,y)
 # mask_loss_f = lambda x,y,var : poly_loss(x,y,var)
-# balanced_l1_loss = BalancedL1Loss()
-mask_loss_f = lambda pred,gt,var : poly_bce_loss(pred,gt,var)
+balanced_l1_loss = BalancedL1Loss()
+# iou_loss = IoULoss()
+
+regularzation_term_weight = 0.05
+regularzation_term_f = lambda pred: torch.mean(
+                    torch.log(0.1 + pred.view(pred.size(0), -1)) +
+                    torch.log(0.1 + 1. - pred.view(pred.size(0), -1)) - -2.20727, dim=-1).mean()
+mask_loss_f = lambda pred,gt,var : balanced_l1_loss(pred,gt)
 # mask_loss_f = PolyLoss()
 metric_f = BinaryMetrics(activation= None) # mask-estimator had use sigmoid
 
@@ -275,6 +281,8 @@ with tqdm(total= total_steps) as pgbars:
                 # mask_loss 
                 mask_loss, in_area_mask_loss, out_area_mask_loss = torch.zeros(1), torch.zeros(1), torch.zeros(1) 
                 mask_loss = mask_loss_f(fake_masks, gt_masks, gt_varmap)
+                regularzation_term_loss = regularzation_term_f(fake_masks)
+                mask_loss_with_regular = mask_loss + regularzation_term_weight * regularzation_term_loss
                 # if args.in_out_area_split:
                 #     mask_loss, in_area_mask_loss, out_area_mask_loss = calculate_mask_loss_with_split(gt_masks, fake_masks, args.in_area_weight, args.out_area_weight, l1_loss_f)
                 # else:
@@ -282,7 +290,7 @@ with tqdm(total= total_steps) as pgbars:
 
                 # genreator loss
                 # g_loss = - fake_loss + l1_loss * abs(fake_loss) + matt_loss + mask_loss
-                g_loss = - fake_loss + ( l1_loss + 100*matt_loss + mask_loss) * abs(fake_loss) 
+                g_loss = - fake_loss + ( l1_loss + 100*matt_loss + mask_loss_with_regular) * abs(fake_loss) 
                 g_loss.backward()
                 optimizer_G.step()
 
@@ -303,6 +311,7 @@ with tqdm(total= total_steps) as pgbars:
                     "in_area_mask_loss": in_area_mask_loss.item(),
                     "out_area_mask_loss": out_area_mask_loss.item(),
                     "Wasserstein_D":Wasserstein_D.item(),
+                    "regularzation_term_loss": regularzation_term_loss.item(),
                     "metric":{
                         "pixel_acc":pixel_acc,  
                         "dice":dice, 
