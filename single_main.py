@@ -2,9 +2,10 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 wandb_prefix_name = "warp_mask_SINGLE"
-know_args = ['--note',"",
+mask_img_f = lambda mask,img: img*(1. - mask) + mask
+know_args = ['--note',"1-mask",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
              "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
@@ -12,7 +13,7 @@ know_args = ['--note',"",
              '--mask_type', "tri",
              '--varmap_type', "small_grid",
              '--varmap_threshold',"-1",
-             
+             "--backbone","vqvae",
              "--mask_weight","1",
              
              "--batch_size","16",
@@ -20,8 +21,9 @@ know_args = ['--note',"",
              '--guassian_ksize','17',
              '--guassian_sigma','0.0',
              '--guassian_blur',
+             '--use_attention',
             #  "--in_out_area_split",
-             "--wandb"
+            #  "--wandb"
             ]
 # image_size = (256,128)
 image_size = (256,256)
@@ -61,7 +63,8 @@ import matplotlib.pyplot as plt
 
 seed_everything(seed)
 args = get_args(know_args)
-assert len(timm.list_models(args.backbone,pretrained=True)) !=0, print(f"no such backbone {args.backbone} ")
+if (args.backbone != "vqvae"):
+    assert len(timm.list_models(args.backbone,pretrained=True)) !=0, print(f"no such backbone {args.backbone} ")
 args.image_size = image_size
 print(vars(args))
 
@@ -73,7 +76,7 @@ image_names = natsorted(os.listdir(origin_dir))
 image_id_list = list(map(lambda s: s.split('.')[0], image_names))
 print(len(image_id_list))
 
-checkallData(d_dir,image_id_list)
+# checkallData(d_dir,image_id_list)
 print("Seed:",seed)
 train_ids, valid_ids = train_test_split(image_id_list , test_size=test_size, random_state=seed)
 print("Total train data:",len(train_ids))
@@ -150,7 +153,7 @@ print("num data per valid:",val_batch_num* args.batch_size)
 
 
 """ Model """
-G = MaskEstimator(image_size = image_size, backbone = args.backbone)
+G = MaskEstimator(image_size = image_size, backbone = args.backbone, use_attention= args.use_attention)
 G = G.to(device)
 """ Optimizer """
 optimizer_G = torch.optim.Adam(G.parameters(), lr=args.lr,betas=(0.5,0.99))
@@ -203,7 +206,7 @@ with tqdm(total= total_steps) as pgbars:
             fake_masks = G(warpped)
             
             # matt_loss
-            matt_loss = l1_loss_f(fake_masks * warpped, fake_masks * origin).mean()
+            matt_loss = l1_loss_f(mask_img_f(fake_masks,warpped), mask_img_f(fake_masks,origin)).mean()
             # mask_loss 
             mask_loss = mask_loss_f(fake_masks, gt_masks, gt_varmap)
             # regularzation
@@ -292,7 +295,7 @@ with tqdm(total= total_steps) as pgbars:
                         fake_masks = G(warpped)
 
                         # matt_loss
-                        matt_loss = l1_loss_f(fake_masks * warpped, fake_masks * origin).mean()
+                        matt_loss = l1_loss_f(mask_img_f(fake_masks,warpped), mask_img_f(fake_masks,origin)).mean()
 
                         # mask_loss 
                         mask_loss = mask_loss_f(fake_masks, gt_masks, gt_varmap)
@@ -354,7 +357,7 @@ with tqdm(total= total_steps) as pgbars:
                     axs[4].imshow( to_pillow_f(gt_masks[k]),vmin=0, vmax=255,cmap='gray' )
 
                     axs[5].set_title('GTMask on warpped')
-                    axs[5].imshow( to_pillow_f(gt_masks[k]*warpped[k]))
+                    axs[5].imshow( to_pillow_f(mask_img_f(gt_masks[k],warpped[k])))
 
                     axs[6].set_title('inv_varmap')
                     axs[6].imshow( to_pillow_f(1 - varmap[k]),vmin=0, vmax=255, cmap='gray' )

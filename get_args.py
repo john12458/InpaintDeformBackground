@@ -25,6 +25,8 @@ def get_args(know_args=None):
     
     # Model Setting
     parser.add_argument('--backbone', dest='backbone', type=str, default="convnext_base_in22k", help='models in timm')
+    parser.add_argument('--use_attention', dest='use_attention',default=False, action="store_true", help='add attention layers')
+
     
     parser.add_argument('--D_iter', dest='D_iter', type=int, default=5, help='d iter per batch')
     parser.add_argument('--G_iter', dest='G_iter', type=int, default=1, help='g iter per batch')
@@ -38,6 +40,8 @@ def get_args(know_args=None):
     parser.add_argument('--in_out_area_split', dest='in_out_area_split',default=False, action="store_true", help='split to in_area_mask_loss and out_area_mask_loss')
     parser.add_argument('--in_area_weight', dest='in_area_weight', type=float, default=0.5, help='in_area_mask weight')
     parser.add_argument('--out_area_weight', dest='out_area_weight', type=float, default=0.5, help='out_area_mask weight')
+
+
 
     # Dir
     parser.add_argument('--data_dir',dest='data_dir',type=str, help="warppeData dir")

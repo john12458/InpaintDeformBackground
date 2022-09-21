@@ -120,7 +120,7 @@ class WarppedDataset(torch.utils.data.Dataset):
         origin = self.basic_transform(origin)
         warpped = self.basic_transform(warpped)
         
-       
+        mask = 1. - mask  # 原本的code 是 0 為mask 區域, Platte 則是 1 為mask區域
       
         
         if self.return_mesh:
