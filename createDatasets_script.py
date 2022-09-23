@@ -484,7 +484,7 @@ class CelebADataset(torch.utils.data.Dataset):
                 np.save(mask_path,mask)
                 
                 # mesh_pts,mesh_tran_pts
-                mesh_path = f"{self.mesh_dir}/{self.image_names[idx].split('.')[0]}.npy"
+                mesh_path = f"{self.mesh_dir}/{self.image_names[idx].split('.')[0]}.npz"
                 np.savez(mesh_path, mesh=mesh_no_last_row, mesh_tran=mesh_trans_no_last_row)
                 
                 
@@ -526,7 +526,7 @@ target_data_dir = f"/workspace/inpaint_mask/data/warpData/fashionLandmarkDetecti
 # In[70]:
 
 
-batch_size = 16
+batch_size = 24
 warp_f = GridTriangularWarp(args=args, 
                             # mesh_size = 16,
                             mesh_size = 24,
@@ -543,7 +543,7 @@ dataset = CelebADataset(warp_f,
 data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, 
                                           shuffle=False,
                                           drop_last=False,
-                                          num_workers=16)
+                                          num_workers=24)
 
 
 # In[71]:
