@@ -2,10 +2,9 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 wandb_prefix_name = "warp_mask_SINGLE"
-mask_img_f = lambda mask,img: img*(1. - mask) + mask
-know_args = ['--note',"1-mask",
+know_args = ['--note',"diff latent ,1-mask",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
              "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
@@ -22,8 +21,9 @@ know_args = ['--note',"1-mask",
              '--guassian_sigma','0.0',
              '--guassian_blur',
              '--use_attention',
+            #  '--mask_inverse',
             #  "--in_out_area_split",
-            #  "--wandb"
+             "--wandb"
             ]
 # image_size = (256,128)
 image_size = (256,256)
@@ -68,6 +68,12 @@ if (args.backbone != "vqvae"):
 args.image_size = image_size
 print(vars(args))
 
+
+mask_img_f = lambda mask,img: img*(mask) 
+if args.mask_inverse:
+    mask_img_f = lambda mask,img: img*(1. - mask) + mask
+else:
+    mask_img_f = lambda mask,img: img*(mask) 
 
 """ Train Val Split """
 d_dir = f"{args.data_dir}/{args.mask_type}/"
@@ -118,7 +124,8 @@ trainset = WarppedDataset(
                  transform=None, 
                  return_mesh=True,
                  checkExist=False,
-                 debug=False)
+                 debug=False,
+                 inverse = args.mask_inverse)
 print("Total train len:",len(trainset))
 train_loader = torch.utils.data.DataLoader(trainset, 
                                           batch_size= args.batch_size,
@@ -137,7 +144,8 @@ validset = WarppedDataset(
                  transform=None, 
                  return_mesh=True,
                  checkExist=False,
-                 debug=False)
+                 debug=False,
+                 inverse = args.mask_inverse)
 print("Total valid len:",len(validset))
 val_loader = torch.utils.data.DataLoader( 
                                           validset, 

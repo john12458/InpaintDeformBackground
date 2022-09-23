@@ -3,6 +3,7 @@ def get_args(know_args=None):
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--note', dest='note', type=str, default="", help='note what you want')
     # Mask Setting
+    parser.add_argument('--mask_inverse', dest='mask_inverse',default=False, action="store_true")
     parser.add_argument('--mask_type', dest='mask_type', type=str, default="grid", help='grid, tri')
     parser.add_argument('--varmap_type', dest='varmap_type', type=str, default="notuse", help='notuse, var(warp), warp(var), small_grid')
     parser.add_argument('--varmap_threshold', dest='varmap_threshold', type=float, default=0.7, help='0 to 1 , if -1: not use')

@@ -484,7 +484,7 @@ class CelebADataset(torch.utils.data.Dataset):
                 np.save(mask_path,mask)
                 
                 # mesh_pts,mesh_tran_pts
-                mesh_path = f"{self.mesh_dir}/{self.image_names[idx].split('.')[0]}.npz"
+                mesh_path = f"{self.mesh_dir}/{self.image_names[idx].split('.')[0]}.npy"
                 np.savez(mesh_path, mesh=mesh_no_last_row, mesh_tran=mesh_trans_no_last_row)
                 
                 
@@ -516,8 +516,9 @@ args.mask_type = "tri"
 args.varmap_type = "notuse"
 args.varmap_threshold = -1
 
-src_data_dir = "/workspace/inpaint_mask/data/CIHP/instance-level_human_parsing/Training/Images/"
-target_data_dir = f"/workspace/inpaint_mask/data/warpData/CIHP/Training/{args.mask_type}"
+# src_data_dir = "/workspace/inpaint_mask/data/CIHP/instance-level_human_parsing/Training/Images/"
+src_data_dir = "/workspace/inpaint_mask/data/fashionLandmarkDetectionBenchmark/"
+target_data_dir = f"/workspace/inpaint_mask/data/warpData/fashionLandmarkDetectionBenchmark/{args.mask_type}"
 
 
 
@@ -550,13 +551,13 @@ data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size,
 cnt = 0
 for data in data_loader:
     cnt += data.shape[0]
-    # break
+#     break
 print("total length:",cnt)
 
 # In[72]:
 
 
-sample_id = "0000006"
+sample_id = "img_00000001"
 
 origin = Image.open(f"{target_data_dir}/origin/{sample_id}.jpg")
 warpped = Image.open(f"{target_data_dir}/warpped/{sample_id}.jpg")

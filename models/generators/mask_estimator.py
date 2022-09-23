@@ -42,7 +42,7 @@ class AttentionLayer(nn.Module):
         # apply Transformer blocks
         for blk in self.decoder_blocks:
             x = blk(x)
-            print("x",x.shape)
+            # print("x",x.shape)
         x = self.decoder_norm(x)
         x = x[:, 1:, :]
         # x = self.decoder_norm(x)
@@ -64,14 +64,14 @@ class MaskEstimator(nn.Module):
 
 
         if use_attention:
-            self.attention = AttentionLayer()
+            self.attention = AttentionLayer(embed_dim=64,decoder_embed_dim=64)
         
         
         md_channels = [1024,512,256,128,64,1]
         if self.backbone_name == "vqvae":
             md_channels = [512,256,64,1]
             if use_attention:
-                md_channels = [256,128,64,1]
+                md_channels = [64,32,16,1]
 
         print("md_channels",md_channels)
         print([ (in_d*2,out_d) for in_d,out_d in zip(md_channels[:-2],md_channels[1:-1])])
@@ -113,7 +113,10 @@ class MaskEstimator(nn.Module):
          )
     def _encode(self,x):
         if self.backbone_name == "vqvae":
-            _, _, _, id_t, id_b = self.encoder.encode(x)
+            _, _, difft, id_t, id_b = self.encoder.encode(x)
+            difft = difft.permute(0, 3, 1, 2).type_as(x) #  32, 32, 64
+            # print("difft",difft.shape)
+            return difft
             return F.one_hot(id_t.detach(), 512).permute(0, 3, 1, 2).type_as(x)
         else:
             return self.encoder.forward_features(x)

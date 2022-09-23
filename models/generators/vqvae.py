@@ -68,7 +68,7 @@ class Quantize(nn.Module):
             embed_normalized = self.embed_avg / cluster_size.unsqueeze(0)
             self.embed.data.copy_(embed_normalized)
 
-        diff = (quantize.detach() - input).pow(2).mean()
+        diff = (quantize.detach() - input)
         quantize = input + (quantize - input).detach()
 
         return quantize, diff, embed_ind
@@ -208,7 +208,7 @@ class VQVAE(nn.Module):
         quant_t = self.quantize_conv_t(enc_t).permute(0, 2, 3, 1)
         quant_t, diff_t, id_t = self.quantize_t(quant_t)
         quant_t = quant_t.permute(0, 3, 1, 2)
-        diff_t = diff_t.unsqueeze(0)
+        # diff_t = diff_t.unsqueeze(0)
 
         dec_t = self.dec_t(quant_t)
         enc_b = torch.cat([dec_t, enc_b], 1)
@@ -218,7 +218,8 @@ class VQVAE(nn.Module):
         quant_b = quant_b.permute(0, 3, 1, 2)
         diff_b = diff_b.unsqueeze(0)
 
-        return quant_t, quant_b, diff_t + diff_b, id_t, id_b
+        return quant_t, quant_b, diff_t , id_t, id_b
+        # return quant_t, quant_b, diff_t + diff_b, id_t, id_b
 
     def decode(self, quant_t, quant_b):
         upsample_t = self.upsample_t(quant_t)

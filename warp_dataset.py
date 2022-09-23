@@ -17,8 +17,9 @@ class WarppedDataset(torch.utils.data.Dataset):
                  transform=None, 
                  return_mesh=False,
                  checkExist=True,
-                 debug = False):   
-        
+                 debug = False,
+                 inverse = False):   
+        self.inverse = inverse
         self.image_ids = image_ids
         self.mask_type = mask_type
         self.varmap_type = varmap_type
@@ -120,7 +121,8 @@ class WarppedDataset(torch.utils.data.Dataset):
         origin = self.basic_transform(origin)
         warpped = self.basic_transform(warpped)
         
-        mask = 1. - mask  # 原本的code 是 0 為mask 區域, Platte 則是 1 為mask區域
+        if self.inverse:
+            mask = 1. - mask  # 原本的code 是 0 為mask 區域, Platte 則是 1 為mask區域
       
         
         if self.return_mesh:
