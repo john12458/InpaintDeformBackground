@@ -64,7 +64,7 @@ class MaskEstimator(nn.Module):
 
 
         if use_attention:
-            self.attention = AttentionLayer(embed_dim=64,decoder_embed_dim=64)
+            self.attention = AttentionLayer(embed_dim=64,decoder_embed_dim=64,decoder_depth=2)
         
         
         md_channels = [1024,512,256,128,64,1]
@@ -96,8 +96,8 @@ class MaskEstimator(nn.Module):
             print(f"load vqvae from : {vqvae_ckpt_path}")
             return model
         else:
-            print(backbone)
-        return timm.create_model(backbone, pretrained=True) 
+            print(self.backbone_name)
+        return timm.create_model(self.backbone_name, pretrained=True) 
         
         
     def _deconv_block(self,in_dim,out_dim,drop_rate=0):

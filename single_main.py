@@ -2,11 +2,12 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 wandb_prefix_name = "warp_mask_SINGLE"
-know_args = ['--note',"diff latent ,1-mask",
+know_args = ['--note',"diff",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
              "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
+            #  "--data_dir","/workspace/inpaint_mask/data/warpData/fashionLandmarkDetectionBenchmark/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
              '--mask_type', "tri",
