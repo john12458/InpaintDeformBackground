@@ -63,8 +63,14 @@ class MaskEstimator(nn.Module):
         self.encoder = self._encoder_selector()
 
 
+        self.attention = use_attention
         if use_attention:
             self.attention = AttentionLayer(embed_dim=64,decoder_embed_dim=64,decoder_depth=2)
+            
+            # self.attention = AttentionLayer(embed_dim=64+64,decoder_embed_dim=64,decoder_depth=2)
+            
+            # self.attention = AttentionLayer(embed_dim=512,decoder_embed_dim=512,decoder_depth=4)
+            # self.attention.decoder_embed = nn.Identity()
         
         
         md_channels = [1024,512,256,128,64,1]
@@ -113,11 +119,35 @@ class MaskEstimator(nn.Module):
          )
     def _encode(self,x):
         if self.backbone_name == "vqvae":
-            _, _, difft, id_t, id_b = self.encoder.encode(x)
-            difft = difft.permute(0, 3, 1, 2).type_as(x) #  32, 32, 64
-            # print("difft",difft.shape)
-            return difft
-            return F.one_hot(id_t.detach(), 512).permute(0, 3, 1, 2).type_as(x)
+            quant_t, _, difft, id_t, id_b = self.encoder.encode(x)
+            # print(quant_t.shape, difft.shape) # torch.Size([16, 64, 32, 32]) torch.Size([16, 32, 32, 64])
+            # difft = difft.permute(0, 3, 1, 2).type_as(x)
+            # cat_quant_t_diff = torch.cat((quant_t,difft),dim=1)
+            # return cat_quant_t_diff
+            # print("id_t",id_t.shape)
+
+            
+            # latent_codebook = F.one_hot(id_t, 512).permute(0, 3, 1, 2).type_as(x)
+
+            latent_code = quant_t
+            if self.attention:
+                latent_code = self.attention(latent_code.detach())
+
+
+                # # print("latent_codebook",latent_codebook.shape)
+                # latent_codebook = self.attention(latent_codebook.detach())
+                # # print("latent_codebook_afer attention",latent_codebook.shape)
+                # latent_codebook = torch.argmax(latent_codebook, dim=1)
+                # # print("reverse one hot latent_codebook",latent_codebook.shape)
+                # latent_code = self.encoder.quantize_t.embed_code(latent_codebook) # idx_t transformer quant_t
+                # # print("latent_code",latent_code.shape)
+                # latent_code = latent_code.permute(0, 3, 1, 2)
+                # # print("latent_code",latent_code.shape)
+
+
+
+            return latent_code
+
         else:
             return self.encoder.forward_features(x)
     
@@ -128,11 +158,7 @@ class MaskEstimator(nn.Module):
         hiddens = []
         # encoder
         latent_code = self._encode(x)
-        # print("latent_code",latent_code.shape)
-        if self.attention:
-            latent_code = self.attention(latent_code)
-        # latent_code = self.attention(latent_code)
-        # print("atten_out",atten_out.shape)
+  
         
         # decoder
         y =  latent_code

@@ -5,6 +5,7 @@ import os
 from tqdm.auto import tqdm
 import torchvision
 import cv2
+import matplotlib.pyplot as plt
 
 to_pillow_f = torchvision.transforms.ToPILImage()
 
@@ -37,3 +38,13 @@ def checkallData(data_dir,image_id_list):
 def check_create_dir(dir_path):
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
+
+def visualize(dicts,img_path):
+    length_dict = len(dicts.keys())
+    # plot result
+    fig, axs = plt.subplots(1, length_dict, figsize=(length_dict*8,8))
+    for i, (k,v) in zip(range(length_dict) , dicts.items()):
+        axs[i].set_title(k)
+        axs[i].imshow(**v)
+    fig.savefig(img_path) 
+    plt.close(fig)

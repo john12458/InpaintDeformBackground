@@ -2,30 +2,31 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 wandb_prefix_name = "warp_mask"
-know_args = ['--note',"BalancedL1Loss + regularzation_term 0.05",
+know_args = ['--note',"with GAN, l1_loss",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
-             "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
-             # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
+            #  "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
+             "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
              '--mask_type', "tri",
-             '--varmap_type', "small_grid",
+             "--regularzation_weight","0.0",
+            #  '--varmap_type', "small_grid",
              '--varmap_threshold',"-1",
              
              "--mask_weight","1",
              
-             "--batch_size","16",
+             "--batch_size","8",
 
              '--guassian_ksize','17',
              '--guassian_sigma','0.0',
-             '--guassian_blur',
+            #  '--guassian_blur',
             #  "--in_out_area_split",
              "--wandb"
             ]
 # image_size = (256,128)
-image_size = (256,256)
-# image_size = (512,512)
+# image_size = (256,256)
+image_size = (512,512)
 seed = 5
 test_size = 0.1
 val_batch_num = 6
@@ -181,7 +182,8 @@ regularzation_term_weight = 0.05
 regularzation_term_f = lambda pred: torch.mean(
                     torch.log(0.1 + pred.view(pred.size(0), -1)) +
                     torch.log(0.1 + 1. - pred.view(pred.size(0), -1)) - -2.20727, dim=-1).mean()
-mask_loss_f = lambda pred,gt,var : balanced_l1_loss(pred,gt)
+# mask_loss_f = lambda pred,gt,var : balanced_l1_loss(pred,gt)
+mask_loss_f = lambda pred,gt,var : l1_loss_f(pred,gt)
 # mask_loss_f = PolyLoss()
 metric_f = BinaryMetrics(activation= None) # mask-estimator had use sigmoid
 

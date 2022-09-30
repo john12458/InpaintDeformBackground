@@ -4,11 +4,12 @@ import os
 """ Setting """
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 wandb_prefix_name = "warp_mask_SINGLE"
-know_args = ['--note',"diff",
+know_args = ['--note',"quant_t",
+             "--no_warp_ratio", "0.0625",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
              "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/fashionLandmarkDetectionBenchmark/",
-             # "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
+            #  "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
              '--mask_type', "tri",
              '--varmap_type', "small_grid",
@@ -24,7 +25,7 @@ know_args = ['--note',"diff",
              '--use_attention',
             #  '--mask_inverse',
             #  "--in_out_area_split",
-             "--wandb"
+            #  "--wandb"
             ]
 # image_size = (256,128)
 image_size = (256,256)
@@ -36,7 +37,7 @@ device = "cuda"
 weight_cliping_limit = 0.01
 
 # assert args.D_iter > args.G_iter,print("WGAN Need D_iter > G_iter") # wgan parameters
-
+from test import test_one
 from losses.bl1_loss import BalancedL1Loss
 from metric import BinaryMetrics 
 from losses.poly_loss import PolyBCELoss 
@@ -50,6 +51,7 @@ from utils import (
     check_create_dir,
     create_guassian_blur_f,
     to_pillow_f,
+    visualize
 )
 from loss_utils import (
     calculate_mask_loss_with_split,
@@ -176,7 +178,9 @@ regularzation_term_f = lambda pred: torch.mean(
 mask_loss_f = lambda pred,gt,var : balanced_l1_loss(pred,gt)
 metric_f = BinaryMetrics(activation= None) # mask-estimator had use sigmoid
 
-
+""" Setting """
+no_warp_num = int(args.batch_size * args.no_warp_ratio)
+print("no_warp_num:",no_warp_num)
 
 # In[54]:
 
@@ -211,6 +215,11 @@ with tqdm(total= total_steps) as pgbars:
             assert warpped.shape == (args.batch_size,3,image_size[0],image_size[1])
             assert gt_masks.shape == (args.batch_size,1,image_size[0],image_size[1])
             assert gt_varmap.shape == (args.batch_size,1,image_size[0],image_size[1])
+
+            if no_warp_num > 0:
+                sample_idxs = torch.randint(0, args.batch_size, (no_warp_num,))
+                warpped[sample_idxs] = origin[sample_idxs].clone()
+                gt_masks[sample_idxs] = torch.ones_like(gt_masks[sample_idxs])
             
             fake_masks = G(warpped)
             
@@ -346,33 +355,43 @@ with tqdm(total= total_steps) as pgbars:
                     img_path = f"{sample_dir}/sample_{step}_{epoch}.jpg"
                     # to_pillow_f(fake_images[k]).save(img_path)
 
-                    # plot result
-                    fig, axs = plt.subplots(1, 7, figsize=(32,8))
-                    axs[0].set_title('origin')
-                    axs[0].imshow( to_pillow_f(origin[k]) )
-                    
-                    axs[1].set_title('warpped')
-                    axs[1].imshow( to_pillow_f(warpped[k]) )
-                    
-                    # axs[2].set_title('fakeImage')
-                    # axs[2].imshow( to_pillow_f(fake_images[k]) )
+                    visual_dict= {
+                        'origin': {
+                            'X':to_pillow_f(origin[k])
+                        }, 
+                        'warpped': {
+                            'X':to_pillow_f(warpped[k])
+                        },
+                        'fakeMask': {
+                            'X':to_pillow_f(fake_masks[k]),
+                            'vmin':0, 
+                            'vmax':255,
+                            'cmap':'gray'
+                        },
+                        'GTMask':{
+                            'X':to_pillow_f(gt_masks[k]),
+                            'vmin':0, 
+                            'vmax':255,
+                            'cmap':'gray'
+                        },
+                        'fakeMask on warpped':{
+                            'X':to_pillow_f(mask_img_f(fake_masks[k],warpped[k]))
+                        },
+                        'GTMask on warpped':{
+                            'X':to_pillow_f(mask_img_f(gt_masks[k],warpped[k])) 
+                        },
+                        # 'inv_varmap': {
+                        #     'X':to_pillow_f(1 - varmap[k]),
+                        #     'vmin':0, 
+                        #     'vmax':255,
+                        #     'cmap':'gray'
+                        # },
+                        'fakeMask on test_05':{
+                            'X': test_one('/workspace/inpaint_mask/data/test/warpped/05.jpeg',G,image_size, mask_img_f, device)
+                        }
+                    }
+                    visualize(visual_dict,img_path)
 
-                    axs[3].set_title('fakeMask')
-                    # 變成pillow之後 vmax應該改成255 而不是 1
-                    axs[3].imshow( to_pillow_f(fake_masks[k]),vmin=0, vmax=255,cmap='gray' )
-                    
-                    axs[4].set_title('GTMask')
-                    # 變成pillow之後 vmax應該改成255 而不是 1
-                    axs[4].imshow( to_pillow_f(gt_masks[k]),vmin=0, vmax=255,cmap='gray' )
-
-                    axs[5].set_title('GTMask on warpped')
-                    axs[5].imshow( to_pillow_f(mask_img_f(gt_masks[k],warpped[k])))
-
-                    axs[6].set_title('inv_varmap')
-                    axs[6].imshow( to_pillow_f(1 - varmap[k]),vmin=0, vmax=255, cmap='gray' )
-
-                    fig.savefig(img_path) 
-                    plt.close(fig)
                     if args.wandb:
                         wandb.log({"Sample_Image": wandb.Image(img_path)}, step = step)
                     

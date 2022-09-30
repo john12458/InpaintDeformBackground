@@ -6,7 +6,11 @@ import numpy as np
 from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
 from PIL import Image
-
+basic_transform = transforms.Compose(
+[
+        transforms.ToTensor(),
+        transforms.Normalize((0., 0., 0.), (1., 1., 1.))
+])
 class WarppedDataset(torch.utils.data.Dataset):
     def __init__(self, data_dir,
                  image_ids,
@@ -26,11 +30,7 @@ class WarppedDataset(torch.utils.data.Dataset):
         self.varmap_threshold = varmap_threshold
         self.guassian_blur_f = guassian_blur_f
           
-        self.basic_transform = transforms.Compose(
-        [
-             transforms.ToTensor(),
-             transforms.Normalize((0., 0., 0.), (1., 1., 1.))
-        ])
+        self.basic_transform = basic_transform
         
         self.transform = transform 
         self.return_mesh = return_mesh
@@ -126,6 +126,9 @@ class WarppedDataset(torch.utils.data.Dataset):
       
         
         if self.return_mesh:
-            return origin, warpped, mesh_pts, mesh_tran_pts, mask, varmap
+            if varmap is not None:
+                return origin, warpped, mesh_pts, mesh_tran_pts, mask, varmap
+            else :
+                return origin, warpped, mesh_pts, mesh_tran_pts, mask, torch.empty(mask.shape)
         else:
             return origin, warpped, mask
