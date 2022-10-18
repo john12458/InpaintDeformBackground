@@ -2,33 +2,38 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 wandb_prefix_name = "warp_mask_SINGLE"
-know_args = ['--note',"quant_t",
-             "--no_warp_ratio", "0.0625",
+know_args = ['--note',"",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
-             "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
+            #  "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/fashionLandmarkDetectionBenchmark/",
-            #  "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
+             "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
-             '--mask_type', "tri",
-             '--varmap_type', "small_grid",
+             '--mask_type', "tps_dgrid",
+             '--varmap_type', "notuse",
+            #  '--varmap_type', "notuse", "--maskloss_type", "l1",
+            
              '--varmap_threshold',"-1",
-             "--backbone","vqvae",
+            #  "--backbone","swinv2_base_window12to16_192to256_22kft1k",
+            #  "--backbone","vqvae", '--use_attention',
              "--mask_weight","1",
-             
-             "--batch_size","16",
+            
+             "--batch_size","16","--no_warp_ratio", "0.0625",
+            #  "--batch_size","10","--no_warp_ratio", "0.1",
 
              '--guassian_ksize','17',
              '--guassian_sigma','0.0',
-             '--guassian_blur',
-             '--use_attention',
+            #  '--guassian_blur',
+            
+             '--use_hieratical',
+             "--no_mesh",
             #  '--mask_inverse',
             #  "--in_out_area_split",
-            #  "--wandb"
+             "--wandb"
             ]
-# image_size = (256,128)
 image_size = (256,256)
+# image_size = (256,128)
 # image_size = (512,512)
 seed = 5
 test_size = 0.1
@@ -37,6 +42,7 @@ device = "cuda"
 weight_cliping_limit = 0.01
 
 # assert args.D_iter > args.G_iter,print("WGAN Need D_iter > G_iter") # wgan parameters
+import torchvision.transforms as transforms
 from test import test_one
 from losses.bl1_loss import BalancedL1Loss
 from metric import BinaryMetrics 
@@ -80,8 +86,8 @@ else:
 
 """ Train Val Split """
 d_dir = f"{args.data_dir}/{args.mask_type}/"
-origin_dir = f"{d_dir}/origin/"
-image_names = natsorted(os.listdir(origin_dir))
+warpped_dir = f"{d_dir}/warpped/"
+image_names = natsorted(os.listdir(warpped_dir))
 image_id_list = list(map(lambda s: s.split('.')[0], image_names))
 print(len(image_id_list))
 
@@ -124,11 +130,13 @@ trainset = WarppedDataset(
                  args.varmap_type,
                  args.varmap_threshold,
                  guassian_blur_f=guassian_blur_f,
-                 transform=None, 
+                #  transform=None, 
+                 transform=transforms.Resize(size = image_size), 
                  return_mesh=True,
                  checkExist=False,
                  debug=False,
-                 inverse = args.mask_inverse)
+                 inverse = args.mask_inverse,
+                 no_mesh = args.no_mesh)
 print("Total train len:",len(trainset))
 train_loader = torch.utils.data.DataLoader(trainset, 
                                           batch_size= args.batch_size,
@@ -144,11 +152,12 @@ validset = WarppedDataset(
                  args.varmap_type,
                  args.varmap_threshold,
                  guassian_blur_f=guassian_blur_f,
-                 transform=None, 
+                 transform=transforms.Resize(size = image_size), 
                  return_mesh=True,
                  checkExist=False,
                  debug=False,
-                 inverse = args.mask_inverse)
+                 inverse = args.mask_inverse,
+                 no_mesh = args.no_mesh)
 print("Total valid len:",len(validset))
 val_loader = torch.utils.data.DataLoader( 
                                           validset, 
@@ -156,7 +165,7 @@ val_loader = torch.utils.data.DataLoader(
                                           shuffle=True,
                                           drop_last=True, 
                                           num_workers=16
-                                         )
+                                        )
 val_batch_num = min(len(val_loader),val_batch_num) if val_batch_num> 0 else len(val_loader)  # 要用幾個batch來驗證 ,  len(val_loader) 個batch 的話就是全部的資料
 # print("val_loader",len(val_loader), "src:", args.val_dir)
 print(f"val_batch_num : {val_batch_num}/{len(val_loader)}")
@@ -164,18 +173,28 @@ print("num data per valid:",val_batch_num* args.batch_size)
 
 
 """ Model """
-G = MaskEstimator(image_size = image_size, backbone = args.backbone, use_attention= args.use_attention)
+G = MaskEstimator(image_size = image_size, backbone = args.backbone, use_attention= args.use_attention, use_hieratical=args.use_hieratical)
 G = G.to(device)
 """ Optimizer """
 optimizer_G = torch.optim.Adam(G.parameters(), lr=args.lr,betas=(0.5,0.99))
 
 """ Loss function """
 l1_loss_f = torch.nn.L1Loss()
-balanced_l1_loss = BalancedL1Loss()
-regularzation_term_f = lambda pred: torch.mean(
-                    torch.log(0.1 + pred.view(pred.size(0), -1)) +
-                    torch.log(0.1 + 1. - pred.view(pred.size(0), -1)) - -2.20727, dim=-1).mean()
-mask_loss_f = lambda pred,gt,var : balanced_l1_loss(pred,gt)
+
+mask_loss_f = None
+regularzation_term_f = None
+if args.maskloss_type == "balancel1":
+    balanced_l1_loss = BalancedL1Loss()
+    regularzation_term_f = lambda pred: torch.mean(
+                        torch.log(0.1 + pred.view(pred.size(0), -1)) +
+                        torch.log(0.1 + 1. - pred.view(pred.size(0), -1)) - -2.20727, dim=-1).mean()
+    mask_loss_f = lambda pred,gt,var : balanced_l1_loss(pred,gt)
+elif args.maskloss_type == "l1":
+    regularzation_term_f = lambda pred: torch.Tensor([0.0]).to(pred.device)
+    mask_loss_f = lambda pred,gt,var : l1_loss_f(pred,gt)
+else:
+    raise NotImplementedError(f"maskloss_type {args.mask_type} not implemented!")
+
 metric_f = BinaryMetrics(activation= None) # mask-estimator had use sigmoid
 
 """ Setting """
@@ -199,8 +218,8 @@ with tqdm(total= total_steps) as pgbars:
             # origin_imgs, warpped_imgs = batch_data
             origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks, varmap = batch_data
             
-            varmap = varmap.permute(0,3,1,2)
-            masks = masks.permute(0,3,1,2)
+            # varmap = varmap.permute(0,3,1,2)
+            # masks = masks.permute(0,3,1,2)
 
             origin_imgs, warpped_imgs = origin_imgs.to(device), warpped_imgs.to(device)
             masks = masks.float().to(device)
@@ -294,8 +313,8 @@ with tqdm(total= total_steps) as pgbars:
                     
                         origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks, varmap = batch_data
             
-                        varmap = varmap.permute(0,3,1,2)
-                        masks = masks.permute(0,3,1,2)
+                        # varmap = varmap.permute(0,3,1,2)
+                        # masks = masks.permute(0,3,1,2)
 
                         origin_imgs, warpped_imgs = origin_imgs.to(device), warpped_imgs.to(device)
                         masks = masks.float().to(device)
@@ -351,6 +370,8 @@ with tqdm(total= total_steps) as pgbars:
                     
                     # print("log_dict[val]",log_dict["val"])
 
+                    
+
                     k = np.random.randint(0, len(origin))
                     img_path = f"{sample_dir}/sample_{step}_{epoch}.jpg"
                     # to_pillow_f(fake_images[k]).save(img_path)
@@ -386,19 +407,42 @@ with tqdm(total= total_steps) as pgbars:
                         #     'vmax':255,
                         #     'cmap':'gray'
                         # },
-                        'fakeMask on test_05':{
-                            'X': test_one('/workspace/inpaint_mask/data/test/warpped/05.jpeg',G,image_size, mask_img_f, device)
-                        }
                     }
+                    """ Test """
+                    test_dict = {}
+                    test_dir = '/workspace/inpaint_mask/data/test/warpped/'
+                    test_files = ['05.jpeg','03.jpeg']
+                    for test_name in test_files:
+                        fake_mask, fake_masks_on_img  = test_one(f'{test_dir}/{test_name}',G,image_size, mask_img_f, device)
+                        test_dict.update({
+                            f'fakeMask on {test_name}':{
+                                'X': to_pillow_f(fake_masks_on_img)
+                            },
+                            f'fakeMask_{test_name}':{
+                                'X': to_pillow_f(fake_mask),
+                                'vmin':0, 
+                                'vmax':255,
+                                'cmap':'gray'
+                            }
+                     })
+
+                    """ Visualize """
+                    # visual_dict.update(test_dict)
                     visualize(visual_dict,img_path)
 
+                    test_img_path = f"{sample_dir}/test_{step}_{epoch}.jpg"
+                    visualize(test_dict,test_img_path)
+
                     if args.wandb:
-                        wandb.log({"Sample_Image": wandb.Image(img_path)}, step = step)
+                        wandb.log({
+                            "Sample_Image": wandb.Image(img_path),
+                            "Test_Image": wandb.Image(test_img_path)
+                        }, step = step)
                     
                         
 
                 """ MODEL SAVE """
-                if np.mod(step, 1000) == 1:
+                if np.mod(step, 1000) == 1 :
                     if not os.path.exists(checkpoint_dir):
                         os.makedirs(checkpoint_dir)
                     torch.save({

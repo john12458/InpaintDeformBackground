@@ -2,7 +2,7 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 wandb_prefix_name = "warp_mask"
 know_args = ['--note',"with GAN, l1_loss",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
@@ -206,8 +206,8 @@ with tqdm(total= total_steps) as pgbars:
             # origin_imgs, warpped_imgs = batch_data
             origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks, varmap = batch_data
             
-            varmap = varmap.permute(0,3,1,2)
-            masks = masks.permute(0,3,1,2)
+            # varmap = varmap.permute(0,3,1,2)
+            # masks = masks.permute(0,3,1,2)
 
             origin_imgs, warpped_imgs = origin_imgs.to(device), warpped_imgs.to(device)
             masks = masks.float().to(device)
@@ -370,8 +370,8 @@ with tqdm(total= total_steps) as pgbars:
                     
                         origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks, varmap = batch_data
             
-                        varmap = varmap.permute(0,3,1,2)
-                        masks = masks.permute(0,3,1,2)
+                        # varmap = varmap.permute(0,3,1,2)
+                        # masks = masks.permute(0,3,1,2)
 
                         origin_imgs, warpped_imgs = origin_imgs.to(device), warpped_imgs.to(device)
                         masks = masks.float().to(device)

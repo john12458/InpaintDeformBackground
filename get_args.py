@@ -4,7 +4,7 @@ def get_args(know_args=None):
     parser.add_argument('--note', dest='note', type=str, default="", help='note what you want')
     # Mask Setting
     parser.add_argument('--no_warp_ratio', dest='no_warp_ratio', type=float, default=0.0, help='no_warp_ratio on trainning each batch')
-
+    parser.add_argument('--no_mesh', dest='no_mesh',default=False, action="store_true")
     parser.add_argument('--mask_inverse', dest='mask_inverse',default=False, action="store_true")
     parser.add_argument('--mask_type', dest='mask_type', type=str, default="grid", help='grid, tri')
     parser.add_argument('--varmap_type', dest='varmap_type', type=str, default="notuse", help='notuse, var(warp), warp(var), small_grid')
@@ -29,6 +29,8 @@ def get_args(know_args=None):
     # Model Setting
     parser.add_argument('--backbone', dest='backbone', type=str, default="convnext_base_in22k", help='models in timm')
     parser.add_argument('--use_attention', dest='use_attention',default=False, action="store_true", help='add attention layers')
+    parser.add_argument('--use_hieratical', dest='use_hieratical',default=False, action="store_true", help=' hieratical layers')
+    
 
     
     parser.add_argument('--D_iter', dest='D_iter', type=int, default=5, help='d iter per batch')
@@ -43,6 +45,9 @@ def get_args(know_args=None):
     parser.add_argument('--in_out_area_split', dest='in_out_area_split',default=False, action="store_true", help='split to in_area_mask_loss and out_area_mask_loss')
     parser.add_argument('--in_area_weight', dest='in_area_weight', type=float, default=0.5, help='in_area_mask weight')
     parser.add_argument('--out_area_weight', dest='out_area_weight', type=float, default=0.5, help='out_area_mask weight')
+
+    parser.add_argument('--maskloss_type', dest='maskloss_type', type=str, default="balancel1", help='balancel1, l1')
+
 
 
 

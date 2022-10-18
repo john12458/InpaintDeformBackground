@@ -22,7 +22,10 @@ class WarppedDataset(torch.utils.data.Dataset):
                  return_mesh=False,
                  checkExist=True,
                  debug = False,
-                 inverse = False):   
+                 inverse = False,
+                 no_mesh = False):   
+
+        self.use_mesh = not no_mesh      
         self.inverse = inverse
         self.image_ids = image_ids
         self.mask_type = mask_type
@@ -99,31 +102,47 @@ class WarppedDataset(torch.utils.data.Dataset):
         origin = Image.open(f"{self.origin_dir}/{select_image_id}.jpg")
         warpped = Image.open(f"{self.warpped_dir}/{select_image_id}.jpg")
         mask = np.load(f"{self.mask_dir}/{select_image_id}.npy")
-        mesh_and_mesh_tran = np.load(f"{self.mesh_dir}/{select_image_id}.npz")
-        mesh_pts = mesh_and_mesh_tran["mesh"]
-        mesh_tran_pts = mesh_and_mesh_tran["mesh_tran"]
         
-        if self.transform:
-            origin = self.transfrom(origin)
-            warpped = self.transfrom(warpped)
-            mask = self.transfrom(mask)
+        if self.use_mesh:
+            mesh_and_mesh_tran = np.load(f"{self.mesh_dir}/{select_image_id}.npz")
+            mesh_pts = mesh_and_mesh_tran["mesh"]
+            mesh_tran_pts = mesh_and_mesh_tran["mesh_tran"]
+        else:
+            mesh_pts, mesh_tran_pts = torch.zeros(1),torch.zeros(1)
+      
         
         varmap = self._varmap_selector(origin,warpped,mesh_pts,mesh_tran_pts)
         if self.debug:
             if varmap is not None:
                 plt.imshow(varmap)
                 plt.savefig('./varmap_sample.jpg')
-
+            
         mask = data_utils.mix_mask_var(mask,varmap,threshold=self.varmap_threshold)   if varmap is not None else mask 
         if self.guassian_blur_f:
             mask = self.guassian_blur_f(mask)
+        if varmap is not None:
+            varmap = torch.from_numpy(varmap).permute(2,0,1).to(dtype = torch.float32)
+        mask = torch.from_numpy(mask).permute(2,0,1).to(dtype = torch.float32)
         
         origin = self.basic_transform(origin)
         warpped = self.basic_transform(warpped)
         
         if self.inverse:
             mask = 1. - mask  # 原本的code 是 0 為mask 區域, Platte 則是 1 為mask區域
+
+        if self.transform:
+            origin =self.transform(origin)
+            # print("origin",origin.shape)
+            warpped =self.transform(warpped)
+            mask =self.transform(mask)
+            # mesh_pts =self.transform(mesh_pts)
+            # mesh_tran_pts =self.transform(mesh_tran_pts)
+
+            if varmap is not None:
+                varmap = self.transform(varmap)
       
+        
+            
         
         if self.return_mesh:
             if varmap is not None:
