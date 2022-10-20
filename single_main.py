@@ -2,7 +2,7 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 wandb_prefix_name = "warp_mask_SINGLE"
 know_args = ['--note',"",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
@@ -11,12 +11,17 @@ know_args = ['--note',"",
              "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
              '--mask_type', "tps_dgrid",
-             '--varmap_type', "notuse",
+             "--mask_threshold", "0.9",
+            # "--lr","0.00006",
+            # "--regularzation_weight","0.0",
+
+            # '--varmap_type', "small_grid",
             #  '--varmap_type', "notuse", "--maskloss_type", "l1",
+             '--varmap_type', "notuse",
             
              '--varmap_threshold',"-1",
             #  "--backbone","swinv2_base_window12to16_192to256_22kft1k",
-            #  "--backbone","vqvae", '--use_attention',
+             "--backbone","vqvae", '--use_attention',
              "--mask_weight","1",
             
              "--batch_size","16","--no_warp_ratio", "0.0625",
@@ -25,12 +30,12 @@ know_args = ['--note',"",
              '--guassian_ksize','17',
              '--guassian_sigma','0.0',
             #  '--guassian_blur',
-            
-             '--use_hieratical',
-             "--no_mesh",
+             "--no_mesh", 
+            #  '--use_hieratical',
+             
             #  '--mask_inverse',
             #  "--in_out_area_split",
-             "--wandb"
+            #  "--wandb"
             ]
 image_size = (256,256)
 # image_size = (256,128)
@@ -136,7 +141,8 @@ trainset = WarppedDataset(
                  checkExist=False,
                  debug=False,
                  inverse = args.mask_inverse,
-                 no_mesh = args.no_mesh)
+                 no_mesh = args.no_mesh,
+                 mask_threshold = args.mask_threshold)
 print("Total train len:",len(trainset))
 train_loader = torch.utils.data.DataLoader(trainset, 
                                           batch_size= args.batch_size,
@@ -157,7 +163,8 @@ validset = WarppedDataset(
                  checkExist=False,
                  debug=False,
                  inverse = args.mask_inverse,
-                 no_mesh = args.no_mesh)
+                 no_mesh = args.no_mesh,
+                 mask_threshold = args.mask_threshold)
 print("Total valid len:",len(validset))
 val_loader = torch.utils.data.DataLoader( 
                                           validset, 
@@ -255,6 +262,10 @@ with tqdm(total= total_steps) as pgbars:
                 args.regularzation_weight * regularzation_term_loss
 
             g_loss.backward()
+            print("grad")
+            for p in G.attention.parameters():
+                print(p.grad.norm())
+            exit(-1)
             optimizer_G.step()
 
             # metric

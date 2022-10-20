@@ -23,7 +23,8 @@ class WarppedDataset(torch.utils.data.Dataset):
                  checkExist=True,
                  debug = False,
                  inverse = False,
-                 no_mesh = False):   
+                 no_mesh = False,
+                 mask_threshold= -1):   
 
         self.use_mesh = not no_mesh      
         self.inverse = inverse
@@ -31,6 +32,7 @@ class WarppedDataset(torch.utils.data.Dataset):
         self.mask_type = mask_type
         self.varmap_type = varmap_type
         self.varmap_threshold = varmap_threshold
+        self.mask_threshold = mask_threshold
         self.guassian_blur_f = guassian_blur_f
           
         self.basic_transform = basic_transform
@@ -72,7 +74,7 @@ class WarppedDataset(torch.utils.data.Dataset):
         if self.mask_type == "grid":
             raise NotImplementedError(f"varmap in grid  not implemented!")
                 
-        elif self.mask_type == "tri":
+        elif self.mask_type == "tri" or self.mask_type == "tps_dgrid":
 
             if self.varmap_type == "var(warp)":
                 return data_utils.get_tri_varmap(np.array(warpped),mesh_pts)
@@ -116,7 +118,13 @@ class WarppedDataset(torch.utils.data.Dataset):
             if varmap is not None:
                 plt.imshow(varmap)
                 plt.savefig('./varmap_sample.jpg')
-            
+
+        # add threshold for mask
+        if self.mask_threshold != -1:
+            mask[mask >= self.mask_threshold] = 1
+            mask[mask <  self.mask_threshold] = 0
+        
+        # mix mask and var
         mask = data_utils.mix_mask_var(mask,varmap,threshold=self.varmap_threshold)   if varmap is not None else mask 
         if self.guassian_blur_f:
             mask = self.guassian_blur_f(mask)

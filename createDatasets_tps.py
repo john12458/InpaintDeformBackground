@@ -1,6 +1,12 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+# In[27]:
+
+
+#!/usr/bin/env python
+# coding: utf-8
+
 # In[1]:
 
 
@@ -12,7 +18,7 @@
 
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 
 # # Classes
@@ -89,7 +95,6 @@ def get_neighbor_diff_guassian(input_tensor, kernel_size= 9, sigma = 1, channels
     dx = torch.nn.functional.conv2d(input_tensor[:,0,:,:].unsqueeze(0), gaussian_kernel, bias=None,stride=1, padding =padding)
     dy = torch.nn.functional.conv2d(input_tensor[:,1,:,:].unsqueeze(0), gaussian_kernel, bias=None,stride=1, padding =padding)
     result = torch.stack([dx[:,0,:,:], dy[:,0,:,:] ],dim=1)
-    print("result",result.shape)
     return result
 
 class TPSWarp:
@@ -100,7 +105,8 @@ class TPSWarp:
                 warp_min_factor=1,
                 warp_max_factor=3,
                 bounding_sample=1,
-                use_neighbor=True
+                use_neighbor=True,
+                use_normlize = True
             ):
         self.mesh_size = mesh_size
         self.num_vertex_wanted_to_move = num_vertex_wanted_to_move
@@ -108,6 +114,7 @@ class TPSWarp:
         self.warp_max_factor = warp_max_factor
         self.use_neighbor = use_neighbor
         self.bounding_sample = bounding_sample
+        self.use_normlize = use_normlize
         
     def __call__(self, pillow_img):
         src_img = np.array(pillow_img)
@@ -168,11 +175,13 @@ class TPSWarp:
         else:
             mask = np.linalg.norm(warped_delta_grid, axis=2)[...,np.newaxis]
         
-        min_max_norm_f = lambda x : (x - x.min()) / (x.max() - x.min())
-        mask = min_max_norm_f(mask)
-        mask = 1- mask
+        if self.use_normlize:
+            min_max_norm_f = lambda x : (x - x.min()) / (x.max() - x.min())
+            mask = min_max_norm_f(mask)
+
+        mask = 1 - mask
         
-        return warpped_img, mesh_pts, mesh_tran_pts, mask
+        return warpped_img, mesh_pts, mesh_tran_pts, mask, warpped_delta_grid
         # return warpped_img, src_pts, target_pts, warpped_delta_grid, neighbor_warpped_delta_grid, mapx, mapy,identity_warp
     
     def __repr__(self) -> str:
@@ -231,6 +240,10 @@ class CelebADataset(torch.utils.data.Dataset):
         self.mesh_dir = f"{savePath}/mesh/"
         check_create_dir(self.mesh_dir)
         
+        self.warp_dgrid_dir = f"{savePath}/warp_dgrid/"
+        check_create_dir(self.warp_dgrid_dir)
+        
+        
         self._test_for_open_img()
         
         
@@ -272,14 +285,14 @@ class CelebADataset(torch.utils.data.Dataset):
         
             
         if self.return_mesh:
-            warpped_img, mesh_no_last_row, mesh_trans_no_last_row,mask = self.warp_f(img_pillow)
+            warpped_img, mesh_no_last_row, mesh_trans_no_last_row,mask, warpped_delta_grid = self.warp_f(img_pillow)
            
             
             
             if self.savePath:
                 # img_pillow = self.centerCrop(img_pillow)
                 origin_path = f"{self.origin_dir}/{self.image_names[idx]}"
-                # img_pillow.save(origin_path)
+                img_pillow.save(origin_path)
                 
                 # warpped_img = self.centerCrop(warpped_img)
                 warpped_img = Image.fromarray(np.uint8(np.array(warpped_img) * padding_mask))
@@ -298,16 +311,23 @@ class CelebADataset(torch.utils.data.Dataset):
                 mask = padded_mask = np.abs(inv_padded_mask - 1)
                 
                 mask_path = f"{self.mask_dir}/{self.image_names[idx].split('.')[0]}"
+                mask = np.float32(mask)
                 np.save(mask_path,mask)
+                
+                
+                warpped_delta_grid_path = f"{self.warp_dgrid_dir}/{self.image_names[idx].split('.')[0]}"
+                warpped_delta_grid = np.int32(warpped_delta_grid*255)
+                np.save( warpped_delta_grid_path, warpped_delta_grid)
                 
                 # mesh_pts,mesh_tran_pts
                 # mesh_path = f"{self.mesh_dir}/{self.image_names[idx].split('.')[0]}.npz"
                 # np.savez(mesh_path, mesh=mesh_no_last_row, mesh_tran=mesh_trans_no_last_row)
                 
                 
-                # print("origin:",origin_path)
+                print("origin:",origin_path)
                 print("warpped:", warpped_path)
                 print("mask_path", mask_path)
+                print("warpped_delta_grid_path:",warpped_delta_grid_path)
                 # print("mesh_path", mesh_path)
                 print("---")
             
@@ -333,20 +353,24 @@ args.mask_type = "tps_dgrid"
 args.varmap_type = "notuse"
 args.varmap_threshold = -1
 
-# src_data_dir = "/workspace/inpaint_mask/data/CIHP/instance-level_human_parsing/Training/Images/"
 src_data_dir = "/workspace/inpaint_mask/data/CIHP/instance-level_human_parsing/Training/Images/"
 target_data_dir = f"/workspace/inpaint_mask/data/warpData/CIHP/Training/{args.mask_type}/"
 
+# src_data_dir = "/workspace/inpaint_mask/data/fashionLandmarkDetectionBenchmark/"
+# target_data_dir = f"/workspace/inpaint_mask/data/warpData/fashionLandmarkDetectionBenchmark/{args.mask_type}/"
 
+# check_create_dir(f"{target_data_dir}")
+# origin_dir = f"{target_data_dir}/origin"
+# os.symlink(src_data_dir, f"{target_data_dir}/origin")
 
 
 # %%
 class RandTPS():
     def __init__(self):
         self.warp_f_list=[
-            TPSWarp(mesh_size = 64, warp_max_factor=3,num_vertex_wanted_to_move=3,bounding_sample=2),
-            TPSWarp(mesh_size = 48, warp_max_factor=4,num_vertex_wanted_to_move=4,bounding_sample=2),
-            TPSWarp(mesh_size = 32, warp_max_factor=6,num_vertex_wanted_to_move=5,bounding_sample=3)
+            TPSWarp(mesh_size = 64, warp_max_factor=3,num_vertex_wanted_to_move=3,bounding_sample=2,use_normlize=True),
+            TPSWarp(mesh_size = 48, warp_max_factor=4,num_vertex_wanted_to_move=4,bounding_sample=2,use_normlize=True),
+            TPSWarp(mesh_size = 32, warp_max_factor=6,num_vertex_wanted_to_move=6,bounding_sample=3,use_normlize=True)
             # TPSWarp(mesh_size = 32, warp_max_factor=3,num_vertex_wanted_to_move=3,bounding_sample=2),
             # TPSWarp(mesh_size = 24, warp_max_factor=4,num_vertex_wanted_to_move=4,bounding_sample=2),
             # TPSWarp(mesh_size = 16, warp_max_factor=6,num_vertex_wanted_to_move=5,bounding_sample=3)
@@ -355,8 +379,12 @@ class RandTPS():
         idx = np.random.randint(3)
         return self.warp_f_list[idx](pillow_img)
 
-batch_size = 24
-num_workers= 24
+
+# In[28]:
+
+
+batch_size = 16
+num_workers= 16
 warp_f = RandTPS()
 dataset = CelebADataset(warp_f,
                         root_dir=src_data_dir,
@@ -373,7 +401,7 @@ data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size,
 
 
 # %%
-
+print("start to warp")
 cnt = 0
 for data in data_loader:
     cnt += data.shape[0]
@@ -383,21 +411,49 @@ print("total length:",cnt)
 # %%
 
 
+# In[37]:
+
+
 # In[3]:
 
 
-sample_id = "0000008"
+sample_id = "img_00000001"
 
 origin = Image.open(f"{target_data_dir}/origin/{sample_id}.jpg")
 warpped = Image.open(f"{target_data_dir}/warpped/{sample_id}.jpg")
 mask = np.load(f"{target_data_dir}/mask/{sample_id}.npy")
+wdgrid = np.load(f"{target_data_dir}/warp_dgrid/{sample_id}.npy")
 # mesh_tran_pts = np.load(f"{target_data_dir}/mesh/{sample_id}.npz")["mesh_tran"]
 
 
-# In[4]:
+# In[38]:
 
 
-mask.shape
+# wdgrid.shape
+
+
+# In[40]:
+
+
+# plt.imshow(wdgrid[...,0],cmap='gray')
+# plt.colorbar()
+
+
+# In[41]:
+
+
+# plt.imshow(wdgrid[...,1],cmap='gray')
+# plt.colorbar()
+
+
+# In[35]:
+
+
+# plt.imshow(mask,cmap='gray')
+# plt.colorbar()
+
+
+# In[32]:
 
 
 # In[5]:
@@ -446,6 +502,9 @@ fig.savefig(f"{target_data_dir}/sample.jpg")
 
 
 # %%
+
+
+# In[ ]:
 
 
 # In[ ]:

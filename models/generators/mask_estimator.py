@@ -147,7 +147,9 @@ class MaskEstimator(nn.Module):
 
         self.attention = use_attention
         if use_attention:
-            self.attention = AttentionLayer(embed_dim=64,decoder_embed_dim=64,decoder_depth=2)
+            # self.attention = AttentionLayer(embed_dim=64,decoder_embed_dim=64,decoder_depth=2)
+            self.attention = AttentionLayer(embed_dim=512,decoder_embed_dim=512,decoder_depth=4)
+            self.attention.decoder_embed = nn.Identity()
         
         self.use_hieratical = use_hieratical
         if self.use_hieratical:
