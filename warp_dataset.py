@@ -73,29 +73,24 @@ class WarppedDataset(torch.utils.data.Dataset):
         
         if self.mask_type == "grid":
             raise NotImplementedError(f"varmap in grid  not implemented!")
-                
-        elif self.mask_type == "tri" or self.mask_type == "tps_dgrid":
-
+        elif self.mask_type == "tri":
             if self.varmap_type == "var(warp)":
                 return data_utils.get_tri_varmap(np.array(warpped),mesh_pts)
-
             elif self.varmap_type == "warp(var)":
                 src_image = np.array(origin)
                 image_size = (src_image.shape[0], src_image[1])
                 tri_varmap = data_utils.get_tri_varmap(src_image, mesh_pts)
                 return data_utils.warp_image(tri_varmap, mesh_pts, mesh_tran_pts, image_size)
-            elif self.varmap_type == "small_grid":
+        # else         
+        if self.varmap_type == "small_grid":
                 mesh_size_for_varmap = 8 
                 src_image = np.array(warpped)
                 image_size = (src_image.shape[0], src_image.shape[1])
                 mesh_for_varmap = data_utils.create_mesh(image_size= image_size, mesh_size = mesh_size_for_varmap)
                 small_grid_varmap = data_utils.get_var_map(src_image,mesh_for_varmap)
                 return small_grid_varmap
-            else:
-                raise NotImplementedError(f"varmap_type {self.varmap_type} not implemented!")
         else:
-            raise NotImplementedError(f"mask_type {self.mask_type} not implemented!")
-        
+            raise NotImplementedError(f"varmap_type {self.varmap_type} not implemented!")
         
     
     def __getitem__(self, idx):

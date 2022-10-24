@@ -2,26 +2,29 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 wandb_prefix_name = "warp_mask_SINGLE"
 know_args = ['--note',"",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/fashionLandmarkDetectionBenchmark/",
              "--data_dir", "/workspace/inpaint_mask/data/warpData/CIHP/Training/",
-             # "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
-             '--mask_type', "tps_dgrid",
-             "--mask_threshold", "0.9",
+            #  "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
+            # "--ckpt_path",'/workspace/inpaint_mask/log/warp_mask_SINGLE/2e9ztqt2/ckpts/ckpt_14001_2.pt',
+
+            '--mask_type', "tps_dgrid_2_origin_true",
+            #  '--mask_type', "tps_dgrid_2",  #"--mask_threshold", "0.9",
+            #  '--mask_type', "tri"
             # "--lr","0.00006",
             # "--regularzation_weight","0.0",
 
-            # '--varmap_type', "small_grid",
+            '--varmap_type', "small_grid",
             #  '--varmap_type', "notuse", "--maskloss_type", "l1",
-             '--varmap_type', "notuse",
+            #  '--varmap_type', "notuse",
             
              '--varmap_threshold',"-1",
             #  "--backbone","swinv2_base_window12to16_192to256_22kft1k",
-             "--backbone","vqvae", '--use_attention',
+            #  "--backbone","vqvae", '--use_attention',
              "--mask_weight","1",
             
              "--batch_size","16","--no_warp_ratio", "0.0625",
@@ -35,7 +38,7 @@ know_args = ['--note',"",
              
             #  '--mask_inverse',
             #  "--in_out_area_split",
-            #  "--wandb"
+             "--wandb"
             ]
 image_size = (256,256)
 # image_size = (256,128)
@@ -182,6 +185,10 @@ print("num data per valid:",val_batch_num* args.batch_size)
 """ Model """
 G = MaskEstimator(image_size = image_size, backbone = args.backbone, use_attention= args.use_attention, use_hieratical=args.use_hieratical)
 G = G.to(device)
+# load model if args.ckpt_path
+if args.ckpt_path != '':
+    print("Load weight from:",args.ckpt_path)
+    G.load_state_dict(torch.load(args.ckpt_path)['G_state_dict'])
 """ Optimizer """
 optimizer_G = torch.optim.Adam(G.parameters(), lr=args.lr,betas=(0.5,0.99))
 
@@ -262,10 +269,7 @@ with tqdm(total= total_steps) as pgbars:
                 args.regularzation_weight * regularzation_term_loss
 
             g_loss.backward()
-            print("grad")
-            for p in G.attention.parameters():
-                print(p.grad.norm())
-            exit(-1)
+     
             optimizer_G.step()
 
             # metric

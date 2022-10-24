@@ -6,7 +6,7 @@ def get_args(know_args=None):
     parser.add_argument('--no_warp_ratio', dest='no_warp_ratio', type=float, default=0.0, help='no_warp_ratio on trainning each batch')
     parser.add_argument('--no_mesh', dest='no_mesh',default=False, action="store_true")
     parser.add_argument('--mask_inverse', dest='mask_inverse',default=False, action="store_true")
-    parser.add_argument('--mask_type', dest='mask_type', type=str, default="grid", help='grid, tri')
+    parser.add_argument('--mask_type', dest='mask_type', type=str, default="grid", help='grid, tri, tps_dgrid, tps_dgrid_2')
     parser.add_argument('--mask_threshold', dest='mask_threshold', type=float, default=-1, help='0 to 1 , if -1: not use')
     
     parser.add_argument('--varmap_type', dest='varmap_type', type=str, default="notuse", help='notuse, var(warp), warp(var), small_grid')
@@ -24,6 +24,8 @@ def get_args(know_args=None):
     
     
     # train Setting
+    parser.add_argument('--ckpt_path', dest='ckpt_path', type=str, default="", help='if ckpt_path, load weight')
+
     parser.add_argument('--epoch', dest='epoch', type=int, default=200, help='# of epoch')
     parser.add_argument('--batch_size', dest='batch_size', type=int, default=1, help='# images in batch')
     parser.add_argument('--lr', dest='lr', type=float, default=0.0002, help='initial learning rate for optimizer')

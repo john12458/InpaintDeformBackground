@@ -181,7 +181,9 @@ class TPSWarp:
 
         mask = 1 - mask
         
-        return warpped_img, mesh_pts, mesh_tran_pts, mask, warpped_delta_grid
+        return warpped_img, mesh_pts, mesh_tran_pts, mask, warpped_delta_grid, identity_warp
+        # return warpped_img, mesh_pts, mesh_tran_pts, mask, warpped_delta_grid
+
         # return warpped_img, src_pts, target_pts, warpped_delta_grid, neighbor_warpped_delta_grid, mapx, mapy,identity_warp
     
     def __repr__(self) -> str:
@@ -285,27 +287,24 @@ class CelebADataset(torch.utils.data.Dataset):
         
             
         if self.return_mesh:
-            warpped_img, mesh_no_last_row, mesh_trans_no_last_row,mask, warpped_delta_grid = self.warp_f(img_pillow)
+            warpped_img, mesh_no_last_row, mesh_trans_no_last_row,mask, warpped_delta_grid, identity_warp = self.warp_f(img_pillow)
            
             
             
             if self.savePath:
-                # img_pillow = self.centerCrop(img_pillow)
+                """ origin """
                 origin_path = f"{self.origin_dir}/{self.image_names[idx]}"
-                img_pillow.save(origin_path)
+                # img_pillow.save(origin_path)
+                identity_warp_img = Image.fromarray(np.uint8(np.array(identity_warp) * padding_mask))
+                identity_warp_img.save(origin_path)
                 
-                # warpped_img = self.centerCrop(warpped_img)
+                """ warpped """
                 warpped_img = Image.fromarray(np.uint8(np.array(warpped_img) * padding_mask))
                 
                 warpped_path = f"{self.warpped_dir}/{self.image_names[idx]}"
                 warpped_img.save(warpped_path )
                 
-                # mask = (np.array( \
-                #         self.centerCrop( \
-                #             Image.fromarray(np.uint8(mask * 255)[:,:,0]) \
-                #         ) \
-                #     )/255)[...,np.newaxis]
-                
+                """ mask """
                 inv_mask = np.abs(mask - 1)
                 inv_padded_mask = inv_mask * padding_mask 
                 mask = padded_mask = np.abs(inv_padded_mask - 1)
@@ -314,11 +313,13 @@ class CelebADataset(torch.utils.data.Dataset):
                 mask = np.float32(mask)
                 np.save(mask_path,mask)
                 
-                
+                """ dgrid """
                 warpped_delta_grid_path = f"{self.warp_dgrid_dir}/{self.image_names[idx].split('.')[0]}"
-                warpped_delta_grid = np.int32(warpped_delta_grid*255)
+                warpped_delta_grid = np.float32(warpped_delta_grid)
                 np.save( warpped_delta_grid_path, warpped_delta_grid)
                 
+
+                # """ mesh """
                 # mesh_pts,mesh_tran_pts
                 # mesh_path = f"{self.mesh_dir}/{self.image_names[idx].split('.')[0]}.npz"
                 # np.savez(mesh_path, mesh=mesh_no_last_row, mesh_tran=mesh_trans_no_last_row)
@@ -349,7 +350,7 @@ class CelebADataset(torch.utils.data.Dataset):
 # %%
 image_size = (512,512)
 args = type('', (), {})()
-args.mask_type = "tps_dgrid"
+args.mask_type = "tps_dgrid_64"
 args.varmap_type = "notuse"
 args.varmap_threshold = -1
 
@@ -368,15 +369,16 @@ target_data_dir = f"/workspace/inpaint_mask/data/warpData/CIHP/Training/{args.ma
 class RandTPS():
     def __init__(self):
         self.warp_f_list=[
-            TPSWarp(mesh_size = 64, warp_max_factor=3,num_vertex_wanted_to_move=3,bounding_sample=2,use_normlize=True),
-            TPSWarp(mesh_size = 48, warp_max_factor=4,num_vertex_wanted_to_move=4,bounding_sample=2,use_normlize=True),
-            TPSWarp(mesh_size = 32, warp_max_factor=6,num_vertex_wanted_to_move=6,bounding_sample=3,use_normlize=True)
+            TPSWarp(mesh_size = 64,warp_min_factor=2, warp_max_factor=4,num_vertex_wanted_to_move=3,bounding_sample=2,use_normlize=True),
+            # TPSWarp(mesh_size = 64, warp_max_factor=2,num_vertex_wanted_to_move=3,bounding_sample=2,use_normlize=True),
+            # TPSWarp(mesh_size = 48, warp_max_factor=4,num_vertex_wanted_to_move=4,bounding_sample=2,use_normlize=True),
+            # TPSWarp(mesh_size = 32, warp_max_factor=6,num_vertex_wanted_to_move=6,bounding_sample=3,use_normlize=True)
             # TPSWarp(mesh_size = 32, warp_max_factor=3,num_vertex_wanted_to_move=3,bounding_sample=2),
             # TPSWarp(mesh_size = 24, warp_max_factor=4,num_vertex_wanted_to_move=4,bounding_sample=2),
             # TPSWarp(mesh_size = 16, warp_max_factor=6,num_vertex_wanted_to_move=5,bounding_sample=3)
         ]
     def __call__(self, pillow_img):
-        idx = np.random.randint(3)
+        idx = np.random.randint(len(self.warp_f_list))
         return self.warp_f_list[idx](pillow_img)
 
 

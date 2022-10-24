@@ -153,7 +153,7 @@ class MaskEstimator(nn.Module):
         
         self.use_hieratical = use_hieratical
         if self.use_hieratical:
-            scale_factor = 2
+            scale_factor = 4
             sub_image_size = [ img_size//scale_factor for img_size in image_size]
             self.resize_0_5_f = transforms.Resize(size = sub_image_size )
             self.global_estimator = Global_estimator(sub_image_size )
@@ -221,24 +221,24 @@ class MaskEstimator(nn.Module):
             # return cat_quant_t_diff
             # print("id_t",id_t.shape)
 
-            print("id_t",id_t.shape) # B, 32, 32
-            latent_codebook = F.one_hot(id_t, 512).permute(0, 3, 1, 2).type_as(x)  # B, 512, 32, 32
-            print("latent_codebook",latent_codebook.shape)
+            # print("id_t",id_t.shape) # B, 32, 32。
+            # latent_codebook = F.one_hot(id_t, 512).permute(0, 3, 1, 2).type_as(x)  # B, 512, 32, 32
+            # print("latent_codebook",latent_codebook.shape)
 
             latent_code = quant_t
             if self.attention:
-                # latent_code = self.attention(latent_code.detach())
+                latent_code = self.attention(latent_code.detach())
 
 
-                # print("latent_codebook",latent_codebook.shape)
-                latent_codebook = self.attention(latent_codebook.detach())
-                # print("latent_codebook_afer attention",latent_codebook.shape)
-                latent_codebook = torch.argmax(latent_codebook, dim=1)
-                # print("reverse one hot latent_codebook",latent_codebook.shape)
-                latent_code = self.encoder.quantize_t.embed_code(latent_codebook) # idx_t transformer quant_t
-                # print("latent_code",latent_code.shape)
-                latent_code = latent_code.permute(0, 3, 1, 2)
-                # print("latent_code",latent_code.shape)
+                # # print("latent_codebook",latent_codebook.shape)
+                # latent_codebook = self.attention(latent_codebook.detach())
+                # # print("latent_codebook_afer attention",latent_codebook.shape)
+                # latent_codebook = torch.argmax(latent_codebook, dim=1)
+                # # print("reverse one hot latent_codebook",latent_codebook.shape)
+                # latent_code = self.encoder.quantize_t.embed_code(latent_codebook) # idx_t transformer quant_t
+                # # print("latent_code",latent_code.shape)
+                # latent_code = latent_code.permute(0, 3, 1, 2)
+                # # print("latent_code",latent_code.shape)
         else:
             latent_code = self.encoder.forward_features(x)
             if self.backbone_name == "swinv2_base_window12to16_192to256_22kft1k":
