@@ -2,7 +2,7 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 wandb_prefix_name = "warp_mask_SINGLE"
 know_args = ['--note',"",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
@@ -16,7 +16,7 @@ know_args = ['--note',"",
             #  '--mask_type', "tps_dgrid_2",  #"--mask_threshold", "0.9",
             #  '--mask_type', "tri"
             # "--lr","0.00006",
-            # "--regularzation_weight","0.0",
+            "--regularzation_weight","0.0",
 
             '--varmap_type', "small_grid",
             #  '--varmap_type', "notuse", "--maskloss_type", "l1",
@@ -38,7 +38,7 @@ know_args = ['--note',"",
              
             #  '--mask_inverse',
             #  "--in_out_area_split",
-             "--wandb"
+            #  "--wandb"
             ]
 image_size = (256,256)
 # image_size = (256,128)

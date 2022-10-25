@@ -108,8 +108,9 @@ def tps_grid_to_remap(grid, sshape):
     mapx : HxW array
     mapy : HxW array
     '''
-
-    mx = (grid[:, :, 0] * sshape[1]).astype(np.float32)
-    my = (grid[:, :, 1] * sshape[0]).astype(np.float32)
+    mx = (grid[:, :, 0] * (sshape[1]-1)).astype(np.float32)
+    my = (grid[:, :, 1] * (sshape[0]-1)).astype(np.float32)
+    # mx = (grid[:, :, 0] * sshape[1]).astype(np.float32)
+    # my = (grid[:, :, 1] * sshape[0]).astype(np.float32)
 
     return mx, my
