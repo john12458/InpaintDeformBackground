@@ -350,7 +350,7 @@ class CelebADataset(torch.utils.data.Dataset):
 # %%
 image_size = (512,512)
 args = type('', (), {})()
-args.mask_type = "tps_dgrid_p16"
+args.mask_type = "tps_dgrid_p16_10_8"
 args.varmap_type = "notuse"
 args.varmap_threshold = -1
 
@@ -370,11 +370,16 @@ class RandTPS():
     def __init__(self):
         self.warp_f_list=[
             # TPSWarp(mesh_size = 64,warp_min_factor=2, warp_max_factor=4,num_vertex_wanted_to_move=3,bounding_sample=2,use_normlize=True),
-            # TPSWarp(mesh_size = 64, warp_max_factor=2,num_vertex_wanted_to_move=3,bounding_sample=2,use_normlize=True),
-            # TPSWarp(mesh_size = 48, warp_max_factor=4,num_vertex_wanted_to_move=4,bounding_sample=2,use_normlize=True),
-            TPSWarp(mesh_size = 32, warp_max_factor=5,num_vertex_wanted_to_move=6,bounding_sample=3,use_normlize=True),
-            TPSWarp(mesh_size = 32, warp_max_factor=5,num_vertex_wanted_to_move=4,bounding_sample=3,use_normlize=True),
-            TPSWarp(mesh_size = 32, warp_max_factor=5,num_vertex_wanted_to_move=2,bounding_sample=3,use_normlize=True)
+            # p16_10_8
+            TPSWarp(mesh_size = 64, warp_max_factor=2,num_vertex_wanted_to_move=2,bounding_sample=2,use_normlize=True),
+            TPSWarp(mesh_size = 48, warp_max_factor=3,num_vertex_wanted_to_move=3,bounding_sample=2,use_normlize=True),
+            TPSWarp(mesh_size = 32, warp_max_factor=4,num_vertex_wanted_to_move=4,bounding_sample=3,use_normlize=True),
+
+
+            # p16
+            # TPSWarp(mesh_size = 32, warp_max_factor=5,num_vertex_wanted_to_move=6,bounding_sample=3,use_normlize=True),
+            # TPSWarp(mesh_size = 32, warp_max_factor=5,num_vertex_wanted_to_move=4,bounding_sample=3,use_normlize=True),
+            # TPSWarp(mesh_size = 32, warp_max_factor=5,num_vertex_wanted_to_move=2,bounding_sample=3,use_normlize=True)
             
             # TPSWarp(mesh_size = 32, warp_max_factor=3,num_vertex_wanted_to_move=3,bounding_sample=2),
             # TPSWarp(mesh_size = 24, warp_max_factor=4,num_vertex_wanted_to_move=4,bounding_sample=2),

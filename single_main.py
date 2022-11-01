@@ -12,21 +12,25 @@ know_args = ['--note',"",
             #  "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
             # "--ckpt_path",'/workspace/inpaint_mask/log/warp_mask_SINGLE/2e9ztqt2/ckpts/ckpt_14001_2.pt',
 
-            '--mask_type', "tps_dgrid_2_origin_true",
+            # '--mask_type', "tps_dgrid_2_origin_true",
+            '--mask_type', "tps_dgrid_p16", # "--mask_threshold", "0.9",
             #  '--mask_type', "tps_dgrid_2",  #"--mask_threshold", "0.9",
             #  '--mask_type', "tri"
             # "--lr","0.00006",
-            "--regularzation_weight","0.0",
+            # "--regularzation_weight","0.0",
 
-            '--varmap_type', "small_grid",
-            #  '--varmap_type', "notuse", "--maskloss_type", "l1",
+            # '--varmap_type', "small_grid",
+            #  '--varmap_type', "notuse", 
+            #  "--maskloss_type", "l1",
             #  '--varmap_type', "notuse",
+
             
              '--varmap_threshold',"-1",
             #  "--backbone","swinv2_base_window12to16_192to256_22kft1k",
             #  "--backbone","vqvae", '--use_attention',
-             "--mask_weight","1",
-            
+            '--lr', "0.00002",
+             "--mask_weight","2",
+            "--matt_weight","100.0",
              "--batch_size","16","--no_warp_ratio", "0.0625",
             #  "--batch_size","10","--no_warp_ratio", "0.1",
 
@@ -36,9 +40,9 @@ know_args = ['--note',"",
              "--no_mesh", 
             #  '--use_hieratical',
              
-            #  '--mask_inverse',
+             '--mask_inverse',
             #  "--in_out_area_split",
-            #  "--wandb"
+             "--wandb"
             ]
 image_size = (256,256)
 # image_size = (256,128)
@@ -252,7 +256,7 @@ with tqdm(total= total_steps) as pgbars:
             if no_warp_num > 0:
                 sample_idxs = torch.randint(0, args.batch_size, (no_warp_num,))
                 warpped[sample_idxs] = origin[sample_idxs].clone()
-                gt_masks[sample_idxs] = torch.ones_like(gt_masks[sample_idxs])
+                gt_masks[sample_idxs] = torch.zeros_like(gt_masks[sample_idxs]) if args.mask_inverse else torch.ones_like(gt_masks[sample_idxs]) 
             
             fake_masks = G(warpped)
             
@@ -343,6 +347,12 @@ with tqdm(total= total_steps) as pgbars:
                         assert gt_masks.shape == (args.batch_size,1,image_size[0],image_size[1])
                         gt_varmap = varmap
                         assert gt_varmap.shape == (args.batch_size,1,image_size[0],image_size[1])
+
+                        # index zero for no warpped
+                        sample_idxs = torch.LongTensor([0])
+                        warpped[sample_idxs] = origin[sample_idxs].clone()
+                        gt_masks[sample_idxs] = torch.zeros_like(gt_masks[sample_idxs]) if args.mask_inverse else torch.ones_like(gt_masks[sample_idxs]) 
+                        
                         
                         fake_masks = G(warpped)
 
@@ -387,10 +397,7 @@ with tqdm(total= total_steps) as pgbars:
 
                     
 
-                    k = np.random.randint(0, len(origin))
-                    img_path = f"{sample_dir}/sample_{step}_{epoch}.jpg"
-                    # to_pillow_f(fake_images[k]).save(img_path)
-
+                    k = np.random.randint(1, len(origin))
                     visual_dict= {
                         'origin': {
                             'X':to_pillow_f(origin[k])
@@ -423,6 +430,46 @@ with tqdm(total= total_steps) as pgbars:
                         #     'cmap':'gray'
                         # },
                     }
+                    img_path = f"{sample_dir}/sample_{step}_{epoch}.jpg"
+                    visualize(visual_dict,img_path)
+
+                    """ No warp image validation """
+                    
+                    no_warp_visual_dict= {
+                        'origin': {
+                            'X':to_pillow_f(origin[0])
+                        }, 
+                        'warpped': {
+                            'X':to_pillow_f(warpped[0])
+                        },
+                        'fakeMask': {
+                            'X':to_pillow_f(fake_masks[0]),
+                            'vmin':0, 
+                            'vmax':255,
+                            'cmap':'gray'
+                        },
+                        'GTMask':{
+                            'X':to_pillow_f(gt_masks[0]),
+                            'vmin':0, 
+                            'vmax':255,
+                            'cmap':'gray'
+                        },
+                        'fakeMask on warpped':{
+                            'X':to_pillow_f(mask_img_f(fake_masks[0],warpped[0]))
+                        },
+                        'GTMask on warpped':{
+                            'X':to_pillow_f(mask_img_f(gt_masks[0],warpped[0])) 
+                        },
+                        # 'inv_varmap': {
+                        #     'X':to_pillow_f(1 - varmap[k]),
+                        #     'vmin':0, 
+                        #     'vmax':255,
+                        #     'cmap':'gray'
+                        # },
+                    }
+                    no_warp_img_path = f"{sample_dir}/no_warp_{step}_{epoch}.jpg"
+                    visualize(no_warp_visual_dict,no_warp_img_path)
+
                     """ Test """
                     test_dict = {}
                     test_dir = '/workspace/inpaint_mask/data/test/warpped/'
@@ -440,24 +487,21 @@ with tqdm(total= total_steps) as pgbars:
                                 'cmap':'gray'
                             }
                      })
-
-                    """ Visualize """
-                    # visual_dict.update(test_dict)
-                    visualize(visual_dict,img_path)
-
                     test_img_path = f"{sample_dir}/test_{step}_{epoch}.jpg"
                     visualize(test_dict,test_img_path)
 
                     if args.wandb:
                         wandb.log({
                             "Sample_Image": wandb.Image(img_path),
-                            "Test_Image": wandb.Image(test_img_path)
+                            "Test_Image": wandb.Image(test_img_path),
+                            "No_Warp_Sample_Image": wandb.Image(no_warp_img_path)
                         }, step = step)
                     
                         
 
                 """ MODEL SAVE """
-                if np.mod(step, 1000) == 1 :
+                if ((epoch <1) and np.mod(step, 1000) == 1) \
+                    or ((epoch >=1) and ((step % len(train_loader) ) == 1) ):
                     if not os.path.exists(checkpoint_dir):
                         os.makedirs(checkpoint_dir)
                     torch.save({
