@@ -137,9 +137,11 @@ class Global_estimator(nn.Module):
 
 class MaskEstimator(nn.Module):
     
-    def __init__(self,image_size,backbone, use_attention=False, use_hieratical = False, drop_rate=0.5):
+    def __init__(self,image_size,backbone, use_attention=False, use_hieratical = False, drop_rate=0.5, no_sigmoid=False):
         super().__init__()
         self.image_size = image_size
+
+        self.no_sigmoid = no_sigmoid
        
         self.backbone_name = backbone
         self.encoder = self._encoder_selector()
@@ -184,7 +186,10 @@ class MaskEstimator(nn.Module):
                 padding=1,
             ),
         )
-        mask_decoder_list.append(nn.Sigmoid())
+        if self.no_sigmoid:
+            pass
+        else:
+            mask_decoder_list.append(nn.Sigmoid())
         self.mask_decoder = nn.ModuleList(mask_decoder_list)
     
     def _encoder_selector(self):

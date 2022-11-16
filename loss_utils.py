@@ -1,27 +1,40 @@
 import torch
-def calculate_mask_loss_with_split(gt_masks, fake_masks, in_area_weight, out_area_weight, loss_f):
+def calculate_mask_loss_with_split(gt_masks, fake_masks, in_area_weight, out_area_weight, loss_f, mask_inverse=False, debug=False):
     # in_out_area_split
-    in_area_mask_loss = None
-    out_area_mask_loss = None
+    in_area_mask_loss = 0.0
+    out_area_mask_loss = 0.0
     # calculate in-area out-area each image
     for i in range(len(gt_masks)):
         
-        out_area = (gt_masks[i] == 1)
-        in_area = (out_area == False)
-
-        in_area_mask_loss_per_image = loss_f(fake_masks[i][in_area],gt_masks[i][in_area]).mean()
-        if in_area_mask_loss == None:
-            in_area_mask_loss = in_area_mask_loss_per_image
+        if mask_inverse:
+            out_area = (gt_masks[i] == 0)
+            in_area = (out_area == False)
         else:
-            in_area_mask_loss += in_area_mask_loss_per_image 
+            out_area = (gt_masks[i] == 1)
+            in_area = (out_area == False)
+        if in_area_weight != 0.0:
+            if len(fake_masks[i][in_area]) == 0 or len(gt_masks[i][in_area]) == 0:
+                pass
+            else:
+                in_area_mask_loss_per_image = loss_f(fake_masks[i][in_area],gt_masks[i][in_area]).mean()
+              
+                if in_area_mask_loss == 0.0:
+                    in_area_mask_loss = in_area_mask_loss_per_image
+                else:
+                    in_area_mask_loss += in_area_mask_loss_per_image 
 
-        out_area_mask_loss_per_image = loss_f(fake_masks[i][out_area], gt_masks[i][out_area]).mean() 
-        if out_area_mask_loss == None:
-            out_area_mask_loss = out_area_mask_loss_per_image
-        else:
-            out_area_mask_loss += out_area_mask_loss_per_image 
-    in_area_mask_loss /= len(gt_masks)
-    out_area_mask_loss /= len(gt_masks)
+        if out_area_weight != 0.0:
+            out_area_mask_loss_per_image = loss_f(fake_masks[i][out_area], gt_masks[i][out_area]).mean() 
+            if out_area_mask_loss == 0.0:
+                out_area_mask_loss = out_area_mask_loss_per_image
+            else:
+                out_area_mask_loss += out_area_mask_loss_per_image 
+                
+    if in_area_mask_loss != 0.0:
+        in_area_mask_loss /= len(gt_masks)
+
+    if out_area_mask_loss != 0.0:
+        out_area_mask_loss /= len(gt_masks)
         
     mask_loss = in_area_weight * in_area_mask_loss + out_area_weight * out_area_mask_loss
 

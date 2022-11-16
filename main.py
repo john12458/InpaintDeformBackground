@@ -11,6 +11,7 @@ know_args = ['--note',"with GAN, l1_loss",
              # "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
              '--mask_type', "tri",
              "--regularzation_weight","0.0",
+             
             #  '--varmap_type', "small_grid",
              '--varmap_threshold',"-1",
              

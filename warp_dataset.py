@@ -6,10 +6,12 @@ import numpy as np
 from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
 from PIL import Image
+from custom_transforms import ComposeWithMultiTensor,RandomApplyWithMultiTensor,RandomResizedCropWithMultiTensor,RandomHorizontalFlipWithMultiTensor,RandomVerticalFlipWithMultiTensor,RandomGrayscaleWithMultiTensor
 basic_transform = transforms.Compose(
 [
         transforms.ToTensor(),
         transforms.Normalize((0., 0., 0.), (1., 1., 1.))
+        # transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])
 ])
 class WarppedDataset(torch.utils.data.Dataset):
     def __init__(self, data_dir,
@@ -18,13 +20,18 @@ class WarppedDataset(torch.utils.data.Dataset):
                  varmap_type,
                  varmap_threshold,
                  guassian_blur_f,
-                 transform=None, 
+                 transform=None,
                  return_mesh=False,
                  checkExist=True,
                  debug = False,
                  inverse = False,
                  no_mesh = False,
-                 mask_threshold= -1):   
+                 mask_threshold= -1,
+                 use_resize_crop=False,
+                 use_custom_transform=False):   
+        self.use_resize_crop = use_resize_crop
+
+        self.use_mix = True if mask_type == "mix_tri_tps" else False
 
         self.use_mesh = not no_mesh      
         self.inverse = inverse
@@ -38,9 +45,13 @@ class WarppedDataset(torch.utils.data.Dataset):
         self.basic_transform = basic_transform
         
         self.transform = transform 
+        self.use_custom_transform = use_custom_transform
+        print("self.use_custom_transform",self.use_custom_transform)
+
         self.return_mesh = return_mesh
         
         d_dir = f"{data_dir}/{mask_type}/"
+        self.data_dir = data_dir
         self.origin_dir = f"{d_dir}/origin/"
         self.warpped_dir = f"{d_dir}/warpped/"
         self.mask_dir = f"{d_dir}/mask/"
@@ -95,6 +106,16 @@ class WarppedDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, idx):
         select_image_id = self.image_ids[idx]
+        if self.use_mix:
+            mask_type_list = ['tri','tps_dgrid_p16']
+            select_mask_type = mask_type_list[np.random.randint(len(mask_type_list))]
+            d_dir = f"{self.data_dir}/{select_mask_type}/"
+            self.origin_dir = f"{d_dir}/origin/"
+            self.warpped_dir = f"{d_dir}/warpped/"
+            self.mask_dir = f"{d_dir}/mask/"
+            self.mesh_dir = f"{d_dir}/mesh/"
+            self.mask_type = select_mask_type
+
         # Get the path to the image 
         origin = Image.open(f"{self.origin_dir}/{select_image_id}.jpg")
         warpped = Image.open(f"{self.warpped_dir}/{select_image_id}.jpg")
@@ -143,7 +164,34 @@ class WarppedDataset(torch.utils.data.Dataset):
 
             if varmap is not None:
                 varmap = self.transform(varmap)
-      
+
+        if self.use_custom_transform:
+            transforms_f = ComposeWithMultiTensor([
+                RandomGrayscaleWithMultiTensor(p=0.5),
+                RandomVerticalFlipWithMultiTensor(p=0.5),
+                RandomHorizontalFlipWithMultiTensor(p=0.5),
+                RandomApplyWithMultiTensor([RandomResizedCropWithMultiTensor(size = (origin.shape[-2],origin.shape[-1]))], p=0.5)
+            ])
+            if varmap is not None:
+                    origin, warpped, mask, varmap = transforms_f([origin, warpped, mask, varmap])
+                    varmap = torch.clamp(varmap, min=0, max=1)
+            else:
+                origin, warpped, mask = transforms_f([origin, warpped, mask])
+            
+            mask = torch.clamp(mask, min=0, max=1)
+
+        else:
+
+            if self.use_resize_crop:
+                crop_f = RandomResizedCropWithMultiTensor(size = (origin.shape[-2],origin.shape[-1]))
+                if varmap is not None:
+                    origin, warpped, mask, varmap = crop_f([origin, warpped, mask, varmap])
+                    varmap = torch.clamp(varmap, min=0, max=1)
+                else:
+                    origin, warpped, mask = crop_f([origin, warpped, mask])
+                
+                mask = torch.clamp(mask, min=0, max=1)
+            
         
             
         

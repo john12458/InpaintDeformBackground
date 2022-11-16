@@ -4,7 +4,7 @@ import os
 """ Setting """
 os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 wandb_prefix_name = "warp_mask_SINGLE"
-know_args = ['--note',"",
+know_args = ['--note',"single_main3",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/fashionLandmarkDetectionBenchmark/",
@@ -96,7 +96,7 @@ from loss_utils import (
 from warp_dataset import WarppedDataset
 from sklearn.model_selection import train_test_split
 import timm
-from models.generators.mask_estimator import MaskEstimator
+from models.generators.mask_estimator2 import MaskEstimator
 from natsort import natsorted
 import matplotlib.pyplot as plt
 

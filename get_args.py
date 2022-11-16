@@ -2,12 +2,17 @@ import argparse
 def get_args(know_args=None):
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--note', dest='note', type=str, default="", help='note what you want')
-    # Mask Setting
+    # Mask/Data Setting
+    parser.add_argument('--use_resize_crop', dest='use_resize_crop', default=False, action="store_true")
+    parser.add_argument('--use_custom_transform', dest='use_custom_transform', default=False, action="store_true")
+    
+
     parser.add_argument('--no_warp_ratio', dest='no_warp_ratio', type=float, default=0.0, help='no_warp_ratio on trainning each batch')
     parser.add_argument('--no_mesh', dest='no_mesh',default=False, action="store_true")
     parser.add_argument('--mask_inverse', dest='mask_inverse',default=False, action="store_true")
-    parser.add_argument('--mask_type', dest='mask_type', type=str, default="grid", help='grid, tri, tps_dgrid, tps_dgrid_2')
+    parser.add_argument('--mask_type', dest='mask_type', type=str, default="grid", help='grid, tri, tps_dgrid, tps_dgrid_2, mix_tri_tps')
     parser.add_argument('--mask_threshold', dest='mask_threshold', type=float, default=-1, help='0 to 1 , if -1: not use')
+    parser.add_argument('--classfication_mask_threshold', dest='classfication_mask_threshold', type=float, default=0.1, help='0 to 1, only use on classfication loss')
     
     parser.add_argument('--varmap_type', dest='varmap_type', type=str, default="notuse", help='notuse, var(warp), warp(var), small_grid')
     parser.add_argument('--varmap_threshold', dest='varmap_threshold', type=float, default=0.7, help='0 to 1 , if -1: not use')
@@ -31,6 +36,8 @@ def get_args(know_args=None):
     parser.add_argument('--lr', dest='lr', type=float, default=0.0002, help='initial learning rate for optimizer')
     
     # Model Setting
+    parser.add_argument('--no_sigmoid', dest='no_sigmoid', default=False, action="store_true")
+
     parser.add_argument('--backbone', dest='backbone', type=str, default="convnext_base_in22k", help='models in timm')
     parser.add_argument('--use_attention', dest='use_attention',default=False, action="store_true", help='add attention layers')
     parser.add_argument('--use_hieratical', dest='use_hieratical',default=False, action="store_true", help=' hieratical layers')
@@ -42,15 +49,17 @@ def get_args(know_args=None):
     parser.add_argument('--type', dest='type', type=str, default="wgangp", help='GAN LOSS TYPE')
     parser.add_argument('--gp_lambda', dest='gp_lambda', type=int, default=10, help='Gradient penalty lambda hyperparameter')
     
+    
+    parser.add_argument('--mask_regression_weight', dest='mask_regression_weight', type=float, default=0.0, help='weight of mask_regression_loss')
     parser.add_argument('--mask_weight', dest='mask_weight', type=float, default=1.0, help='weight of mask_loss')
     parser.add_argument('--matt_weight', dest='matt_weight', type=float, default=100.0, help='weight of matt_loss')
     parser.add_argument('--regularzation_weight', dest='regularzation_weight', type=float, default=0.05, help='weight of regularzation')
 
     parser.add_argument('--in_out_area_split', dest='in_out_area_split',default=False, action="store_true", help='split to in_area_mask_loss and out_area_mask_loss')
-    parser.add_argument('--in_area_weight', dest='in_area_weight', type=float, default=0.5, help='in_area_mask weight')
-    parser.add_argument('--out_area_weight', dest='out_area_weight', type=float, default=0.5, help='out_area_mask weight')
+    parser.add_argument('--in_area_weight', dest='in_area_weight', type=float, default=0.0, help='in_area_mask weight')
+    parser.add_argument('--out_area_weight', dest='out_area_weight', type=float, default=0.0, help='out_area_mask weight')
 
-    parser.add_argument('--maskloss_type', dest='maskloss_type', type=str, default="balancel1", help='balancel1, l1')
+    parser.add_argument('--maskloss_type', dest='maskloss_type', type=str, default="balancel1", help='balancel1, l1, cross_entropy')
 
 
 

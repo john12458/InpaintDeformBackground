@@ -2,7 +2,7 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 wandb_prefix_name = "warp_mask_SINGLE"
 know_args = ['--note',"",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
@@ -12,16 +12,18 @@ know_args = ['--note',"",
             #  "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
             # "--ckpt_path",'/workspace/inpaint_mask/log/warp_mask_SINGLE/2e9ztqt2/ckpts/ckpt_14001_2.pt',
             # '--maskloss_type',"poly_bce_loss","--classfication_mask_threshold","0.1",
-            '--maskloss_type',"cross_entropy","--classfication_mask_threshold","0.1",
-            # '--maskloss_type',"dice_loss","--classfication_mask_threshold","0.1",
+            # '--maskloss_type',"cross_entropy","--classfication_mask_threshold","0.1",
+            '--maskloss_type',"dice_loss","--classfication_mask_threshold","0.1",
             # "--regularzation_weight","0.0",
             '--lr', "0.00002",
             # '--lr', "0.0002",
-            # '--maskloss_type','balancel1_sigmoid',"--mask_weight","1",
+            '--maskloss_type','balancel1_sigmoid',"--mask_weight","1",
             "--matt_weight","100.0","--mask_regression_weight","0.0","--regularzation_weight","0.05",
             # "--matt_weight","0.0","--mask_regression_weight","0.0","--regularzation_weight","0.0",
-            # '--mask_type', "mix_tri_tps","--mask_threshold", "0.9",
-            '--mask_type', "tps_dgrid_p16","--mask_threshold", "0.9",
+            '--mask_type', "mix_tri_tps","--mask_threshold", "0.9",
+            # '--mask_type', "tps_dgrid_p16","--mask_threshold", "0.9",
+            '--varmap_type', "small_grid",
+
             
             # '--mask_type', "tps_dgrid_2_origin_true",
              # "--mask_threshold", "0.9",
@@ -31,7 +33,6 @@ know_args = ['--note',"",
             # "--lr","0.00006",
             # 
 
-            # '--varmap_type', "small_grid",
             #  '--varmap_type', "notuse", 
             #  "--maskloss_type", "l1",
             #  '--varmap_type', "notuse",
@@ -51,7 +52,7 @@ know_args = ['--note',"",
             #  '--guassian_blur',
              "--no_mesh", 
             #  '--use_hieratical',
-            
+             '--use_custom_transform',
              '--use_resize_crop',
              '--mask_inverse',
              '--no_sigmoid',
@@ -66,8 +67,8 @@ image_size = (256,256)
 # image_size = (512,512)
 seed = 5
 test_size = 0.1
-val_batch_num = 6
-# val_batch_num = -1
+# val_batch_num = 6
+val_batch_num = -1
 device = "cuda"
 weight_cliping_limit = 0.01
 
@@ -96,7 +97,7 @@ from loss_utils import (
 from warp_dataset import WarppedDataset
 from sklearn.model_selection import train_test_split
 import timm
-from models.generators.mask_estimator import MaskEstimator
+from models.generators.mask_estimator3 import MaskEstimator
 from natsort import natsorted
 import matplotlib.pyplot as plt
 
@@ -185,7 +186,8 @@ trainset = WarppedDataset(
                  inverse = args.mask_inverse,
                  no_mesh = args.no_mesh,
                  mask_threshold = args.mask_threshold,
-                 use_resize_crop = args.use_resize_crop)
+                 use_resize_crop = args.use_resize_crop,
+                 use_custom_transform = args.use_custom_transform)
 print("Total train len:",len(trainset))
 train_loader = torch.utils.data.DataLoader(trainset, 
                                           batch_size= args.batch_size,
@@ -468,7 +470,7 @@ with tqdm(total= total_steps) as pgbars:
                         
                         # in_area_l1_metric
                         in_area_l1_metric = calculate_mask_loss_with_split(gt_masks, fake_masks, in_area_weight=1.0, out_area_weight=0.0, loss_f=l1_loss_f, mask_inverse=args.mask_inverse,debug=True)[1]
-                        val_metric = metric_f(gt_masks, fake_masks)
+                        val_metric = metric_f(gt_masks.cpu(), fake_masks.cpu())
                         val_metrics.append(val_metric)
                         val_in_area_metric.append(in_area_l1_metric.item())
 
@@ -584,7 +586,9 @@ with tqdm(total= total_steps) as pgbars:
                     is_best = (("g_loss" in val_loss_dict) and (min_val_loss > val_loss_dict["g_loss"]))
                     if is_best:
                         min_val_loss = val_loss_dict["g_loss"]
-                        wandb.run.summary["min_g_loss_step"] = step
+                        if args.wandb:
+                            wandb.run.summary["min_g_loss_step"] = step
+                            wandb.run.summary["min_g_loss_recall"] = recall
                         """ Train """
                         train_img_path = f"{sample_dir}/train_{step}_{epoch}.jpg"
                         visualize(visual_train_dict,train_img_path)

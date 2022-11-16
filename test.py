@@ -22,6 +22,8 @@ def test_one(path,G,image_size,mask_img_f,device):
     test_image_tensor = test_image_tensor.unsqueeze(0).to(device)
 
     fake_masks = G(test_image_tensor)
+    if G.no_sigmoid:
+        fake_masks = torch.sigmoid(fake_masks)
     fake_masks_on_img = mask_img_f(fake_masks[0],test_image_tensor[0])
     fake_mask = fake_masks[0]
     return fake_mask, fake_masks_on_img 

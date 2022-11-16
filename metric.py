@@ -145,9 +145,10 @@ class BinaryMetrics():
     Also this calculator provides the function to calculate specificity, also known as true negative 
     rate, as specificity/TPR is meaningless in multiclass cases.
     """
-    def __init__(self, eps=1e-5, activation='0-1'):
+    def __init__(self, eps=1e-5, activation='0-1', gt_activation_f = False):
         self.eps = eps
         self.activation = activation
+        self.gt_activation_f = gt_activation_f
 
     def _calculate_overlap_metrics(self, gt, pred):
         output = pred.view(-1, )
@@ -169,6 +170,9 @@ class BinaryMetrics():
     def __call__(self, y_true, y_pred):
         # y_true: (N, H, W)
         # y_pred: (N, 1, H, W)
+        if self.gt_activation_f:
+            y_true = self.gt_activation_f(y_true)
+
         if self.activation in [None, 'none']:
             activation_fn = lambda x: x
             activated_pred = activation_fn(y_pred)
