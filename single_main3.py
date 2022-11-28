@@ -2,9 +2,11 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 wandb_prefix_name = "warp_mask_SINGLE"
-know_args = ['--note',"",
+freeze_encoder = True
+know_args = ['--note',"freeze_encoder",
+            #  "--lpips_threshold", "2e-2",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/fashionLandmarkDetectionBenchmark/",
@@ -13,7 +15,7 @@ know_args = ['--note',"",
             # "--ckpt_path",'/workspace/inpaint_mask/log/warp_mask_SINGLE/2e9ztqt2/ckpts/ckpt_14001_2.pt',
             # '--maskloss_type',"poly_bce_loss","--classfication_mask_threshold","0.1",
             # '--maskloss_type',"cross_entropy","--classfication_mask_threshold","0.1",
-            '--maskloss_type',"dice_loss","--classfication_mask_threshold","0.1",
+            # '--maskloss_type',"dice_loss","--classfication_mask_threshold","0.1",
             # "--regularzation_weight","0.0",
             '--lr', "0.00002",
             # '--lr', "0.0002",
@@ -22,7 +24,7 @@ know_args = ['--note',"",
             # "--matt_weight","0.0","--mask_regression_weight","0.0","--regularzation_weight","0.0",
             '--mask_type', "mix_tri_tps","--mask_threshold", "0.9",
             # '--mask_type', "tps_dgrid_p16","--mask_threshold", "0.9",
-            '--varmap_type', "small_grid",
+            # '--varmap_type', "small_grid",
 
             
             # '--mask_type', "tps_dgrid_2_origin_true",
@@ -187,7 +189,8 @@ trainset = WarppedDataset(
                  no_mesh = args.no_mesh,
                  mask_threshold = args.mask_threshold,
                  use_resize_crop = args.use_resize_crop,
-                 use_custom_transform = args.use_custom_transform)
+                 use_custom_transform = args.use_custom_transform,
+                 lpips_threshold = args.lpips_threshold)
 print("Total train len:",len(trainset))
 train_loader = torch.utils.data.DataLoader(trainset, 
                                           batch_size= args.batch_size,
@@ -209,7 +212,8 @@ validset = WarppedDataset(
                  debug=False,
                  inverse = args.mask_inverse,
                  no_mesh = args.no_mesh,
-                 mask_threshold = args.mask_threshold)
+                 mask_threshold = args.mask_threshold,
+                 lpips_threshold = args.lpips_threshold)
 print("Total valid len:",len(validset))
 val_loader = torch.utils.data.DataLoader( 
                                           validset, 
@@ -234,7 +238,12 @@ if args.ckpt_path != '':
     print("Load weight from:",args.ckpt_path)
     G.load_state_dict(torch.load(args.ckpt_path)['G_state_dict'])
 """ Optimizer """
-optimizer_G = torch.optim.Adam(G.parameters(), lr=args.lr,betas=(0.5,0.99))
+# In[54]:
+if freeze_encoder:
+    print("Freeze G.encoder")
+    for param in G.encoder.parameters():
+        param.requires_grad = False
+optimizer_G = torch.optim.Adam(filter(lambda p: p.requires_grad, G.parameters()), lr=args.lr,betas=(0.5,0.99))
 
 """ Loss function """
 l1_loss_f = torch.nn.L1Loss()
@@ -316,7 +325,7 @@ metric_f = BinaryMetrics(gt_activation_f= lambda x: mask_filter_threshold_f(x,ar
 
 
 
-# In[54]:
+
 
 
 import gc

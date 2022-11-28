@@ -2,9 +2,11 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
-wandb_prefix_name = "warp_mask_SINGLE"
-know_args = ['--note',"",
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+wandb_prefix_name = "DCT_warp_mask_SINGLE"
+know_args = ['--note',"DCT",
+            "--backbone","hrnet_w48",
+             "--lpips_threshold", "0.0",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/fashionLandmarkDetectionBenchmark/",
@@ -12,16 +14,19 @@ know_args = ['--note',"",
             #  "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
             # "--ckpt_path",'/workspace/inpaint_mask/log/warp_mask_SINGLE/2e9ztqt2/ckpts/ckpt_14001_2.pt',
             # '--maskloss_type',"poly_bce_loss","--classfication_mask_threshold","0.1",
-            '--maskloss_type',"cross_entropy","--classfication_mask_threshold","0.1",
+            # '--maskloss_type',"cross_entropy","--classfication_mask_threshold","0.1",
             # '--maskloss_type',"dice_loss","--classfication_mask_threshold","0.1",
             # "--regularzation_weight","0.0",
             '--lr', "0.00002",
             # '--lr', "0.0002",
-            # '--maskloss_type','balancel1_sigmoid',"--mask_weight","1",
+            # '--lr', "0.0002",
+            '--maskloss_type','balancel1_sigmoid',"--mask_weight","1",
             "--matt_weight","100.0","--mask_regression_weight","0.0","--regularzation_weight","0.05",
             # "--matt_weight","0.0","--mask_regression_weight","0.0","--regularzation_weight","0.0",
-            # '--mask_type', "mix_tri_tps","--mask_threshold", "0.9",
-            '--mask_type', "tps_dgrid_p16","--mask_threshold", "0.9",
+            '--mask_type', "mix_tri_tps","--mask_threshold", "0.9",
+            # '--mask_type', "tps_dgrid_p16","--mask_threshold", "0.9",
+            # '--varmap_type', "small_grid",
+
             
             # '--mask_type', "tps_dgrid_2_origin_true",
              # "--mask_threshold", "0.9",
@@ -31,7 +36,6 @@ know_args = ['--note',"",
             # "--lr","0.00006",
             # 
 
-            # '--varmap_type', "small_grid",
             #  '--varmap_type', "notuse", 
             #  "--maskloss_type", "l1",
             #  '--varmap_type', "notuse",
@@ -51,10 +55,11 @@ know_args = ['--note',"",
             #  '--guassian_blur',
              "--no_mesh", 
             #  '--use_hieratical',
-            
+             '--use_custom_transform',
              '--use_resize_crop',
              '--mask_inverse',
              '--no_sigmoid',
+             "--use_dct",
             #  "--in_out_area_split",
              "--wandb"
             ]
@@ -66,14 +71,14 @@ image_size = (256,256)
 # image_size = (512,512)
 seed = 5
 test_size = 0.1
-val_batch_num = 6
-# val_batch_num = -1
+# val_batch_num = 1
+val_batch_num = -1
 device = "cuda"
 weight_cliping_limit = 0.01
 
 # assert args.D_iter > args.G_iter,print("WGAN Need D_iter > G_iter") # wgan parameters
 import torchvision.transforms as transforms
-from test import test_one
+from test import test_one_dct
 from losses.bl1_loss import BalancedL1Loss
 from metric import BinaryMetrics 
 from losses.poly_loss import PolyBCELoss 
@@ -96,7 +101,7 @@ from loss_utils import (
 from warp_dataset import WarppedDataset
 from sklearn.model_selection import train_test_split
 import timm
-from models.generators.mask_estimator import MaskEstimator
+from models.generators.mask_estimator_dct import MaskEstimator
 from natsort import natsorted
 import matplotlib.pyplot as plt
 
@@ -185,7 +190,10 @@ trainset = WarppedDataset(
                  inverse = args.mask_inverse,
                  no_mesh = args.no_mesh,
                  mask_threshold = args.mask_threshold,
-                 use_resize_crop = args.use_resize_crop)
+                 use_resize_crop = args.use_resize_crop,
+                 use_custom_transform = args.use_custom_transform,
+                 lpips_threshold = args.lpips_threshold,
+                 use_dct = args.use_dct)
 print("Total train len:",len(trainset))
 train_loader = torch.utils.data.DataLoader(trainset, 
                                           batch_size= args.batch_size,
@@ -207,7 +215,9 @@ validset = WarppedDataset(
                  debug=False,
                  inverse = args.mask_inverse,
                  no_mesh = args.no_mesh,
-                 mask_threshold = args.mask_threshold)
+                 mask_threshold = args.mask_threshold,
+                 lpips_threshold = args.lpips_threshold,
+                 use_dct = args.use_dct)
 print("Total valid len:",len(validset))
 val_loader = torch.utils.data.DataLoader( 
                                           validset, 
@@ -328,10 +338,13 @@ with tqdm(total= total_steps) as pgbars:
             pgbars.set_description(f"Epoch:{epoch}/{args.epoch}-b{idx}/{len(train_loader)}")
             G.train()
 
-            origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks, varmap = batch_data
+            origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks, varmap, origin_dct, warpped_dct, origin_qtables, warpped_qtables  = batch_data
             origin_imgs, warpped_imgs = origin_imgs.to(device), warpped_imgs.to(device)
             masks = masks.float().to(device)
             varmap = varmap.float().to(device)
+            warpped_dct = warpped_dct.float().to(device)
+            origin_dct = origin_dct.float().to(device)
+            origin_qtables, warpped_qtables = origin_qtables.float().to(device), warpped_qtables.float().to(device)
 
             origin,warpped,gt_masks = origin_imgs, warpped_imgs, masks
             gt_varmap = varmap
@@ -345,10 +358,12 @@ with tqdm(total= total_steps) as pgbars:
 
             if no_warp_num > 0:
                 sample_idxs = torch.randint(0, args.batch_size, (no_warp_num,))
+                warpped_dct[sample_idxs] = origin_dct[sample_idxs].clone()
+                warpped_qtables[sample_idxs] = origin_qtables[sample_idxs].clone()
                 warpped[sample_idxs] = origin[sample_idxs].clone()
                 gt_masks[sample_idxs] = torch.zeros_like(gt_masks[sample_idxs]) if args.mask_inverse else torch.ones_like(gt_masks[sample_idxs]) 
             
-            fake_masks = G(warpped)
+            fake_masks = G(warpped, warpped_dct, warpped_qtables)
             g_loss,loss_dict = compute_loss(fake_masks, gt_masks, gt_varmap, warpped, origin)
             g_loss.backward()
             optimizer_G.step()
@@ -433,31 +448,34 @@ with tqdm(total= total_steps) as pgbars:
                     # for _ in range(1):
                         # batch_data = next(iter(val_loader))
                     
-                        origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks, varmap = batch_data
-            
-                        # varmap = varmap.permute(0,3,1,2)
-                        # masks = masks.permute(0,3,1,2)
-
+                        origin_imgs, warpped_imgs, origin_meshes, warpped_meshes, masks, varmap, origin_dct, warpped_dct, origin_qtables, warpped_qtables  = batch_data
                         origin_imgs, warpped_imgs = origin_imgs.to(device), warpped_imgs.to(device)
                         masks = masks.float().to(device)
                         varmap = varmap.float().to(device)
+                        warpped_dct = warpped_dct.float().to(device)
+                        origin_dct = origin_dct.float().to(device)
+                        origin_qtables, warpped_qtables = origin_qtables.float().to(device), warpped_qtables.float().to(device)
 
-                        
-                        origin,warpped = origin_imgs, warpped_imgs
-                        gt_masks = masks
+                        origin,warpped,gt_masks = origin_imgs, warpped_imgs, masks
+                        gt_varmap = varmap
+                            
+                        optimizer_G.zero_grad()
+
                         assert origin.shape == (args.batch_size,3,image_size[0],image_size[1])
                         assert warpped.shape == (args.batch_size,3,image_size[0],image_size[1])
                         assert gt_masks.shape == (args.batch_size,1,image_size[0],image_size[1])
-                        gt_varmap = varmap
                         assert gt_varmap.shape == (args.batch_size,1,image_size[0],image_size[1])
 
+          
                         # index zero for no warpped
                         sample_idxs = torch.LongTensor([0])
+                        warpped_dct[sample_idxs] = origin_dct[sample_idxs].clone()
+                        warpped_qtables[sample_idxs] = origin_qtables[sample_idxs].clone()
                         warpped[sample_idxs] = origin[sample_idxs].clone()
                         gt_masks[sample_idxs] = torch.zeros_like(gt_masks[sample_idxs]) if args.mask_inverse else torch.ones_like(gt_masks[sample_idxs]) 
                         
                         
-                        fake_masks = G(warpped)
+                        fake_masks = G(warpped, warpped_dct, warpped_qtables)
                         g_loss,loss_dict = compute_loss(fake_masks, gt_masks, gt_varmap, warpped, origin)
                         for k,v in loss_dict.items():
                             if k in val_loss_dict:
@@ -468,7 +486,7 @@ with tqdm(total= total_steps) as pgbars:
                         
                         # in_area_l1_metric
                         in_area_l1_metric = calculate_mask_loss_with_split(gt_masks, fake_masks, in_area_weight=1.0, out_area_weight=0.0, loss_f=l1_loss_f, mask_inverse=args.mask_inverse,debug=True)[1]
-                        val_metric = metric_f(gt_masks, fake_masks)
+                        val_metric = metric_f(gt_masks.cpu(), fake_masks.cpu())
                         val_metrics.append(val_metric)
                         val_in_area_metric.append(in_area_l1_metric.item())
 
@@ -584,7 +602,9 @@ with tqdm(total= total_steps) as pgbars:
                     is_best = (("g_loss" in val_loss_dict) and (min_val_loss > val_loss_dict["g_loss"]))
                     if is_best:
                         min_val_loss = val_loss_dict["g_loss"]
-                        wandb.run.summary["min_g_loss_step"] = step
+                        if args.wandb:
+                            wandb.run.summary["min_g_loss_step"] = step
+                            wandb.run.summary["min_g_loss_recall"] = recall
                         """ Train """
                         train_img_path = f"{sample_dir}/train_{step}_{epoch}.jpg"
                         visualize(visual_train_dict,train_img_path)
@@ -595,7 +615,7 @@ with tqdm(total= total_steps) as pgbars:
                         test_dir = '/workspace/inpaint_mask/data/test/warpped/'
                         test_files = ['05.jpeg','03.jpeg']
                         for test_name in test_files:
-                            fake_mask, fake_masks_on_img  = test_one(f'{test_dir}/{test_name}',G,image_size, mask_img_f, device)
+                            fake_mask, fake_masks_on_img  = test_one_dct(f'{test_dir}/{test_name}',G,image_size, mask_img_f, device)
                             
                             test_dict.update({
                                 f'fakeMask on {test_name}':{

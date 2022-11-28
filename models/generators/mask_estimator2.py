@@ -18,9 +18,13 @@ class MaskEstimator(nn.Module):
 
 
         # classfication branch
-        md_channels = [1024,512,256,128,64,1]
-        md_input_channels = [1024, 512+3, 256, 128+3]
-        md_output_channels = [512, 256, 128, 64]
+        md_channels = [2048,1024,512,256,128,1]
+        md_input_channels = [2048,1024,512,256]
+        md_output_channels = [1024,512,256,128]
+
+        # md_channels = [1024,512,256,128,64,1]
+        # md_input_channels = [1024, 512+3, 256, 128+3]
+        # md_output_channels = [512, 256, 128, 64]
         
         mask_decoder_list = [self._deconv_block(in_d, out_d, drop_rate=drop_rate) for in_d,out_d in zip(md_input_channels,md_output_channels)]
         mask_decoder_list.append(
@@ -89,10 +93,11 @@ class MaskEstimator(nn.Module):
         hiddens = []
         # encoder
         latent_code = self._encode(x) 
+        
 
         # decoder
         y =  latent_code
-        # print("latent_code",latent_code.shape)
+        # latent_code torch.Size([16, 2048, 8, 8]) hrnet
 # latent_code torch.Size([16, 1024, 8, 8])
 # y_h torch.Size([16, 3, 64, 64])
 # decoder torch.Size([16, 512, 16, 16])
@@ -102,17 +107,17 @@ class MaskEstimator(nn.Module):
 # decoder torch.Size([16, 1, 256, 256])
 
         
-        y_h16 = F.interpolate(x, scale_factor=0.0625, mode="bilinear") #16
-        y_h4 = F.interpolate(x, scale_factor=0.25, mode="bilinear") #64
+        # y_h16 = F.interpolate(x, scale_factor=0.0625, mode="bilinear") #16
+        # y_h4 = F.interpolate(x, scale_factor=0.25, mode="bilinear") #64
         # print("y_h",y_h.shape)
 
         
         for idx,layer in enumerate(self.mask_decoder):
             y=layer(y)
-            if idx == 0:
-                y = torch.cat((y,y_h16),dim=1)
-            if idx == 2:
-                y = torch.cat((y,y_h4),dim=1)
+            # if idx == 0:
+            #     y = torch.cat((y,y_h16),dim=1)
+            # if idx == 2:
+            #     y = torch.cat((y,y_h4),dim=1)
                 
 
         
