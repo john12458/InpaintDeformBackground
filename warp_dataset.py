@@ -28,7 +28,18 @@ class WarppedDataset(torch.utils.data.Dataset):
                  no_mesh = False,
                  mask_threshold= -1,
                  use_resize_crop=False,
-                 use_custom_transform=False):   
+                 use_custom_transform=False,
+                 lpips_threshold = 0.0,
+                 use_dct=False):   
+        
+        self.use_dct = use_dct
+
+        unmask_value = 0 if inverse else 1
+        
+        self.lpips_filter = None
+        if lpips_threshold > 0:
+            self.lpips_filter = data_utils.LPIPS_filter(lpips_threshold,unmask_value = unmask_value)
+        
         self.use_resize_crop = use_resize_crop
 
         self.use_mix = True if mask_type == "mix_tri_tps" else False
@@ -117,9 +128,22 @@ class WarppedDataset(torch.utils.data.Dataset):
             self.mask_type = select_mask_type
 
         # Get the path to the image 
-        origin = Image.open(f"{self.origin_dir}/{select_image_id}.jpg")
-        warpped = Image.open(f"{self.warpped_dir}/{select_image_id}.jpg")
+        origin_path = f"{self.origin_dir}/{select_image_id}.jpg"
+        origin = Image.open(origin_path)
+        warpped_path = f"{self.warpped_dir}/{select_image_id}.jpg"
+        warpped = Image.open(warpped_path)
         mask = np.load(f"{self.mask_dir}/{select_image_id}.npy")
+
+        if self.use_dct: # dct only y channel
+            origin_dct_list, origin_qtables = data_utils.get_jpeg_info(origin_path)
+            origin_dct = torch.from_numpy(origin_dct_list[0]).unsqueeze(0)
+            origin_qtables = torch.from_numpy(origin_qtables[0]).unsqueeze(0)
+
+            warpped_dct_list, warpped_qtables = data_utils.get_jpeg_info(warpped_path)
+            warpped_dct = torch.from_numpy(warpped_dct_list[0]).unsqueeze(0)
+            warpped_qtables = torch.from_numpy(warpped_qtables[0]).unsqueeze(0)
+            
+            
         
         if self.use_mesh:
             mesh_and_mesh_tran = np.load(f"{self.mesh_dir}/{select_image_id}.npz")
@@ -153,6 +177,9 @@ class WarppedDataset(torch.utils.data.Dataset):
         
         if self.inverse:
             mask = 1. - mask  # 原本的code 是 0 為mask 區域, Platte 則是 1 為mask區域
+            
+        if self.lpips_filter:
+            mask = self.lpips_filter(mask,origin,warpped)
 
         if self.transform:
             origin =self.transform(origin)
@@ -164,6 +191,13 @@ class WarppedDataset(torch.utils.data.Dataset):
 
             if varmap is not None:
                 varmap = self.transform(varmap)
+            if self.use_dct: # dct only y channel
+                origin_dct = self.transform(origin_dct)
+                warpped_dct = self.transform(warpped_dct)
+        
+       
+                
+       
 
         if self.use_custom_transform:
             transforms_f = ComposeWithMultiTensor([
@@ -173,10 +207,17 @@ class WarppedDataset(torch.utils.data.Dataset):
                 RandomApplyWithMultiTensor([RandomResizedCropWithMultiTensor(size = (origin.shape[-2],origin.shape[-1]))], p=0.5)
             ])
             if varmap is not None:
+                if self.use_dct:
+                    origin, warpped, mask, varmap, origin_dct, warpped_dct  = transforms_f([origin, warpped, mask, varmap, origin_dct, warpped_dct ])
+                else:                        
                     origin, warpped, mask, varmap = transforms_f([origin, warpped, mask, varmap])
                     varmap = torch.clamp(varmap, min=0, max=1)
+
             else:
-                origin, warpped, mask = transforms_f([origin, warpped, mask])
+                if self.use_dct:
+                    origin, warpped, mask, origin_dct, warpped_dct = transforms_f([origin, warpped, mask, origin_dct, warpped_dct])
+                else:
+                    origin, warpped, mask = transforms_f([origin, warpped, mask])
             
             mask = torch.clamp(mask, min=0, max=1)
 
@@ -191,11 +232,18 @@ class WarppedDataset(torch.utils.data.Dataset):
                     origin, warpped, mask = crop_f([origin, warpped, mask])
                 
                 mask = torch.clamp(mask, min=0, max=1)
+                
+                
+      
             
-        
+         
             
         
         if self.return_mesh:
+            if self.use_dct:
+                warpped_dct = data_utils.to_dct_volume(warpped_dct)
+                origin_dct = data_utils.to_dct_volume(origin_dct)
+                return origin, warpped, mesh_pts, mesh_tran_pts, mask, torch.empty(mask.shape), origin_dct, warpped_dct , origin_qtables, warpped_qtables
             if varmap is not None:
                 return origin, warpped, mesh_pts, mesh_tran_pts, mask, varmap
             else :

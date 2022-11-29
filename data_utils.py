@@ -1,7 +1,130 @@
-#. https://github.com/alyssaq/face_morpher/blob/dlib/facemorpher/warper.py
+# refernece:
+# https://github.com/alyssaq/face_morpher/blob/dlib/facemorpher/warper.py
+# https://github.com/mjkwon2021/CAT-Net/blob/90739212417fe78b6bc7bc3b3a5fd93902fa67b1/Splicing/data/AbstractDataset.py#L17
 from matplotlib import path
 import numpy as np
 import scipy.spatial as spatial
+
+from torchvision.transforms.functional import to_pil_image
+import lpips
+import torch
+import jpegio
+import torch
+
+def to_dct_volume(dct_coef_tensor : torch.Tensor, T = 20):    
+    dct_volume_tensor = torch.zeros(size=(T+1, dct_coef_tensor.shape[1], dct_coef_tensor.shape[2]))
+    dct_volume_tensor[0] += (dct_coef_tensor == 0).float().squeeze()
+    for i in range(1, T):
+        dct_volume_tensor[i] += (dct_coef_tensor == i).float().squeeze()
+        dct_volume_tensor[i] += (dct_coef_tensor == -i).float().squeeze()
+    dct_volume_tensor[T] += (dct_coef_tensor >= T).float().squeeze()
+    dct_volume_tensor[T] += (dct_coef_tensor <= -T).float().squeeze()
+    return dct_volume_tensor
+
+
+
+def get_jpeg_info(im_path):
+        """
+        :param im_path: JPEG image path
+        :return: DCT_coef (Y,Cb,Cr), qtables (Y,Cb,Cr)
+        """
+        num_channels = 3
+        jpeg = jpegio.read(str(im_path))
+
+        # determine which axes to up-sample
+        ci = jpeg.comp_info
+        need_scale = [[ci[i].v_samp_factor, ci[i].h_samp_factor] for i in range(num_channels)]
+        if num_channels == 3:
+            if ci[0].v_samp_factor == ci[1].v_samp_factor == ci[2].v_samp_factor:
+                need_scale[0][0] = need_scale[1][0] = need_scale[2][0] = 2
+            if ci[0].h_samp_factor == ci[1].h_samp_factor == ci[2].h_samp_factor:
+                need_scale[0][1] = need_scale[1][1] = need_scale[2][1] = 2
+        else:
+            need_scale[0][0] = 2
+            need_scale[0][1] = 2
+
+        # up-sample DCT coefficients to match image size
+        DCT_coef = []
+        for i in range(num_channels):
+            r, c = jpeg.coef_arrays[i].shape
+            coef_view = jpeg.coef_arrays[i].reshape(r//8, 8, c//8, 8).transpose(0, 2, 1, 3)
+            # case 1: row scale (O) and col scale (O)
+            if need_scale[i][0]==1 and need_scale[i][1]==1:
+                out_arr = np.zeros((r * 2, c * 2))
+                out_view = out_arr.reshape(r * 2 // 8, 8, c * 2 // 8, 8).transpose(0, 2, 1, 3)
+                out_view[::2, ::2, :, :] = coef_view[:, :, :, :]
+                out_view[1::2, ::2, :, :] = coef_view[:, :, :, :]
+                out_view[::2, 1::2, :, :] = coef_view[:, :, :, :]
+                out_view[1::2, 1::2, :, :] = coef_view[:, :, :, :]
+
+            # case 2: row scale (O) and col scale (X)
+            elif need_scale[i][0]==1 and need_scale[i][1]==2:
+                out_arr = np.zeros((r * 2, c))
+                DCT_coef.append(out_arr)
+                out_view = out_arr.reshape(r*2//8, 8, c // 8, 8).transpose(0, 2, 1, 3)
+                out_view[::2, :, :, :] = coef_view[:, :, :, :]
+                out_view[1::2, :, :, :] = coef_view[:, :, :, :]
+
+            # case 3: row scale (X) and col scale (O)
+            elif need_scale[i][0]==2 and need_scale[i][1]==1:
+                out_arr = np.zeros((r, c * 2))
+                out_view = out_arr.reshape(r // 8, 8, c * 2 // 8, 8).transpose(0, 2, 1, 3)
+                out_view[:, ::2, :, :] = coef_view[:, :, :, :]
+                out_view[:, 1::2, :, :] = coef_view[:, :, :, :]
+
+            # case 4: row scale (X) and col scale (X)
+            elif need_scale[i][0]==2 and need_scale[i][1]==2:
+                out_arr = np.zeros((r, c))
+                out_view = out_arr.reshape(r // 8, 8, c // 8, 8).transpose(0, 2, 1, 3)
+                out_view[:, :, :, :] = coef_view[:, :, :, :]
+
+            else:
+                raise KeyError("Something wrong here.")
+
+            DCT_coef.append(out_arr)
+
+        # quantization tables
+        qtables = [jpeg.quant_tables[ci[i].quant_tbl_no].astype(np.float) for i in range(num_channels)]
+
+        return DCT_coef, qtables
+
+class LPIPS_filter():
+    def __init__(self,lpips_threshold, unmask_value = 0): #  unmask_value = 0 | 1
+        self.lpips_threshold = lpips_threshold
+        self.loss_fn_alex = lpips.LPIPS(net='alex')
+        self.unmask_value = unmask_value
+    def __call__(self,mask,origin_tensor,warpped_tensor):
+        
+        lpips_threshold = self.lpips_threshold
+        loss_fn_alex = self.loss_fn_alex
+        image_size = origin_tensor.shape[-2:]
+        
+        NUM_SIZE = 16
+        PATCH_SIZE = k_size=image_size[0]//NUM_SIZE
+        patches = mask.unfold(1, PATCH_SIZE, PATCH_SIZE).unfold(2, PATCH_SIZE, PATCH_SIZE)
+        warpped_patches = warpped_tensor.unfold(1, PATCH_SIZE, PATCH_SIZE).unfold(2, PATCH_SIZE, PATCH_SIZE)
+        origin_patches = origin_tensor.unfold(1, PATCH_SIZE, PATCH_SIZE).unfold(2, PATCH_SIZE, PATCH_SIZE)
+
+        have_mask_list = []
+        for i in range(NUM_SIZE):
+            for j in range(NUM_SIZE):
+                sub_img = patches[:, i, j]
+                if(torch.count_nonzero(sub_img)!=0):
+                    have_mask_list.append((i,j))
+        threshold_mask_patches = patches.clone()
+        
+        unmask_patch = torch.zeros(patches.shape[-2:]) if self.unmask_value == 0 else torch.ones(patches.shape[-2:])
+
+        for idx,(i,j) in enumerate(have_mask_list):
+            w_patch = warpped_patches[:,i,j]
+            o_patch = origin_patches[:,i,j]
+            loss = loss_fn_alex(w_patch,o_patch).mean().item()
+            if loss < lpips_threshold:
+                threshold_mask_patches[:,i,j] = unmask_patch.clone()
+                
+        return threshold_mask_patches.permute(0,1,3,2,4).flatten(start_dim=3,end_dim=4).flatten(start_dim=1,end_dim=2)
+        
+        
 
 def create_mesh(image_size,mesh_size: int):
     assert len(image_size) == 2, print("image_size len must be 2", len(image_size))
