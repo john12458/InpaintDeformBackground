@@ -40,6 +40,7 @@ def get_args(know_args=None):
     parser.add_argument('--lr', dest='lr', type=float, default=0.0002, help='initial learning rate for optimizer')
     
     # Model Setting
+    parser.add_argument('--use_bayar', dest='use_bayar', default=False, action="store_true")
     parser.add_argument('--no_sigmoid', dest='no_sigmoid', default=False, action="store_true")
 
     parser.add_argument('--backbone', dest='backbone', type=str, default="convnext_base_in22k", help='models in timm')

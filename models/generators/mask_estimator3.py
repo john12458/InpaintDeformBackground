@@ -3,77 +3,52 @@ import torch.nn as nn
 import timm
 from torch.nn import functional as F
 from timm.models.layers import LayerNorm2d
-# from timm.models.vision_transformer import PatchEmbed, Block
 import torchvision.transforms as transforms
-# class DeConvNeXtBlock(nn.Module):
-#     """ ConvNeXt Block
-#     There are two equivalent implementations:
-#       (1) DwConv -> LayerNorm (channels_first) -> 1x1 Conv -> GELU -> 1x1 Conv; all in (N, C, H, W)
-#       (2) DwConv -> Permute to (N, H, W, C); LayerNorm (channels_last) -> Linear -> GELU -> Linear; Permute back
-#     Unlike the official impl, this one allows choice of 1 or 2, 1x1 conv can be faster with appropriate
-#     choice of LayerNorm impl, however as model size increases the tradeoffs appear to change and nn.Linear
-#     is a better choice. This was observed with PyTorch 1.10 on 3090 GPU, it could change over time & w/ different HW.
-#     Args:
-#         in_chs (int): Number of input channels.
-#         drop_path (float): Stochastic depth rate. Default: 0.0
-#         ls_init_value (float): Init value for Layer Scale. Default: 1e-6.
-#     """
+def rgb2gray(rgb):
+    b, g, r = rgb[:, 0, :, :], rgb[:, 1, :, :], rgb[:, 2, :, :]
+    gray = 0.2989*r + 0.5870*g + 0.1140*b
+    gray = torch.unsqueeze(gray, 1)
+    return gray
 
-#     def __init__(
-#             self,
-#             in_chs,
-#             out_chs=None,
-#             kernel_size=7,
-#             stride=1,
-#             dilation=1,
-#             mlp_ratio=4,
-#             conv_mlp=False,
-#             conv_bias=True,
-#             ls_init_value=1e-6,
-#             act_layer='gelu',
-#             norm_layer=None,
-#             drop_path=0.,
-#     ):
-#         super().__init__()
-#         out_chs = out_chs or in_chs
-#         act_layer = get_act_layer(act_layer)
-#         if not norm_layer:
-#             norm_layer = LayerNorm2d if conv_mlp else LayerNorm
-#         mlp_layer = ConvMlp if conv_mlp else Mlp
-#         self.use_conv_mlp = conv_mlp
+class BayarConv2d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=5, stride=1, padding=0):
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.minus1 = (torch.ones(self.in_channels, self.out_channels, 1) * -1.000)
 
-#         self.conv_dw = create_conv2d(
-#             in_chs, out_chs, kernel_size=kernel_size, stride=stride, dilation=dilation, depthwise=True, bias=conv_bias)
-#         self.norm = norm_layer(out_chs)
-#         self.mlp = mlp_layer(out_chs, int(mlp_ratio * out_chs), act_layer=act_layer)
-#         self.gamma = nn.Parameter(ls_init_value * torch.ones(out_chs)) if ls_init_value > 0 else None
-#         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        super(BayarConv2d, self).__init__()
+        # only (kernel_size ** 2 - 1) trainable params as the center element is always -1
+        self.kernel = nn.Parameter(torch.rand(self.in_channels, self.out_channels, kernel_size ** 2 - 1),
+                                   requires_grad=True)
 
-#     def forward(self, x):
-#         shortcut = x
-#         x = self.conv_dw(x)
-#         if self.use_conv_mlp:
-#             x = self.norm(x)
-#             x = self.mlp(x)
-#         else:
-#             x = x.permute(0, 2, 3, 1)
-#             x = self.norm(x)
-#             x = self.mlp(x)
-#             x = x.permute(0, 3, 1, 2)
-#         if self.gamma is not None:
-#             x = x.mul(self.gamma.reshape(1, -1, 1, 1))
 
-#         x = self.drop_path(x) + shortcut
-#         return x
+    def bayarConstraint(self):
+        self.kernel.data = self.kernel.permute(2, 0, 1)
+        self.kernel.data = torch.div(self.kernel.data, self.kernel.data.sum(0))
+        self.kernel.data = self.kernel.permute(1, 2, 0)
+        ctr = self.kernel_size ** 2 // 2
+        real_kernel = torch.cat((self.kernel[:, :, :ctr], self.minus1.to(self.kernel.device), self.kernel[:, :, ctr:]), dim=2)
+        real_kernel = real_kernel.reshape((self.out_channels, self.in_channels, self.kernel_size, self.kernel_size))
+        return real_kernel
+
+    def forward(self, x):
+        x = F.conv2d(x, self.bayarConstraint(), stride=self.stride, padding=self.padding)
+        return x
+
 class MaskEstimator(nn.Module):
     
-    def __init__(self,image_size,backbone, use_attention=False, use_hieratical = False, drop_rate=0.5, no_sigmoid=False):
+    def __init__(self,image_size,backbone, use_attention=False, use_hieratical = False, drop_rate=0.5, no_sigmoid=False, use_bayar=False):
         super().__init__()
         print("-- Model --")
-        self.image_size = image_size
+        self.use_bayar = use_bayar
+        if self.use_bayar:
+            self.constrain_conv = BayarConv2d(in_channels=1, out_channels=3, padding=2)
 
+        self.image_size = image_size
         self.no_sigmoid = no_sigmoid
-       
         self.backbone_name = backbone
         print("backbone", backbone)
 
@@ -87,7 +62,6 @@ class MaskEstimator(nn.Module):
             md_input_channels[i+1] *= 2 
 
         print("md_input_channels:",md_input_channels)
-        # md_input_channels = [1024, 512, 256, 128]
         md_output_channels = [512, 256, 128, 64]
         
         mask_decoder_list = [self._deconv_block(in_d, out_d, drop_rate=drop_rate) for in_d,out_d in zip(md_input_channels,md_output_channels)]
@@ -120,8 +94,8 @@ class MaskEstimator(nn.Module):
                     stride=2,
                     padding=1,
                 ),
-                nn.Dropout(drop_rate),
-                # nn.BatchNorm2d(out_dim),
+                # nn.Dropout(drop_rate),
+                nn.BatchNorm2d(out_dim),
                 nn.ReLU()
         )
 
@@ -145,11 +119,15 @@ class MaskEstimator(nn.Module):
     def forward(self, x):
         batch_size = x.shape[0]
         assert x.shape == (batch_size,3,self.image_size[0],self.image_size[1])
+        if self.use_bayar:
+            x = rgb2gray(x)
+            x = self.constrain_conv(x)
         # encoder
         latent_code, feature_list = self._encoder_FPN(x)
         reverse_feature_list = feature_list[::-1][1:]
         y = latent_code
-        #decoder
+        
+        # decoder
         for idx,layer in enumerate(self.mask_decoder):
             y=layer(y)
             if idx < len(reverse_feature_list) and idx in self.idx_skip_connect_list:

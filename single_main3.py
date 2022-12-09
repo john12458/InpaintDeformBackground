@@ -2,10 +2,10 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 wandb_prefix_name = "warp_mask_SINGLE"
-freeze_encoder = True
-know_args = ['--note',"freeze_encoder",
+freeze_encoder = False
+know_args = ['--note',"",
             #  "--lpips_threshold", "2e-2",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
@@ -58,6 +58,7 @@ know_args = ['--note',"freeze_encoder",
              '--use_resize_crop',
              '--mask_inverse',
              '--no_sigmoid',
+             '--use_bayar',
             #  "--in_out_area_split",
              "--wandb"
             ]
@@ -231,7 +232,7 @@ print("num data per valid:",val_batch_num* args.batch_size)
 
 
 """ Model """
-G = MaskEstimator(image_size = image_size, backbone = args.backbone, use_attention= args.use_attention, use_hieratical=args.use_hieratical, no_sigmoid = args.no_sigmoid)
+G = MaskEstimator(image_size = image_size, backbone = args.backbone, use_attention= args.use_attention, use_hieratical=args.use_hieratical, no_sigmoid = args.no_sigmoid, use_bayar = args.use_bayar)
 G = G.to(device)
 # load model if args.ckpt_path
 if args.ckpt_path != '':
