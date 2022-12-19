@@ -58,6 +58,7 @@ def get_args(know_args=None):
     parser.add_argument('--mask_regression_weight', dest='mask_regression_weight', type=float, default=0.0, help='weight of mask_regression_loss')
     parser.add_argument('--mask_weight', dest='mask_weight', type=float, default=1.0, help='weight of mask_loss')
     parser.add_argument('--matt_weight', dest='matt_weight', type=float, default=100.0, help='weight of matt_loss')
+    parser.add_argument('--matt_lpips_weight', dest='matt_lpips_weight', type=float, default=0.0, help='weight of matt_lpips_loss')
     parser.add_argument('--regularzation_weight', dest='regularzation_weight', type=float, default=0.05, help='weight of regularzation')
 
     parser.add_argument('--in_out_area_split', dest='in_out_area_split',default=False, action="store_true", help='split to in_area_mask_loss and out_area_mask_loss')

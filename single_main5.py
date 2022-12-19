@@ -2,12 +2,11 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 wandb_prefix_name = "warp_mask_SINGLE"
 freeze_encoder = False
-know_args = ['--note',"cosine_scheduler",
-            "--matt_lpips_weight","0.0",
-            #  "--lpips_threshold", "2e-2",
+know_args = ['--note',"",
+             "--lpips_threshold", "2e-2",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/fashionLandmarkDetectionBenchmark/",
@@ -18,8 +17,8 @@ know_args = ['--note',"cosine_scheduler",
             # '--maskloss_type',"cross_entropy","--classfication_mask_threshold","0.1",
             '--maskloss_type',"dice_loss","--classfication_mask_threshold","0.1",
             # "--regularzation_weight","0.0",
+            # '--lr', "0.00002",
             '--lr', "0.0002",
-            # '--lr', "0.0002",
             # '--maskloss_type','balancel1_sigmoid',"--mask_weight","1",
             "--matt_weight","100.0","--mask_regression_weight","0.0","--regularzation_weight","0.05",
             # "--matt_weight","0.0","--mask_regression_weight","0.0","--regularzation_weight","0.0",
@@ -59,7 +58,7 @@ know_args = ['--note',"cosine_scheduler",
              '--use_resize_crop',
              '--mask_inverse',
              '--no_sigmoid',
-            #  '--use_bayar',
+             '--use_bayar',
             #  "--in_out_area_split",
              "--wandb"
             ]
@@ -102,10 +101,9 @@ from loss_utils import (
 from warp_dataset import WarppedDataset
 from sklearn.model_selection import train_test_split
 import timm
-from models.generators.mask_estimator3 import MaskEstimator
+from models.generators.mask_estimator5 import MaskEstimator
 from natsort import natsorted
 import matplotlib.pyplot as plt
-
 
 seed_everything(seed)
 args = get_args(know_args)
@@ -253,11 +251,6 @@ scheduler = CosineAnnealingWarmupRestarts(optimizer_G, first_cycle_steps=2500, c
 """ Loss function """
 l1_loss_f = torch.nn.L1Loss()
 
-lpips_loss_f = None
-if args.matt_lpips_weight != 0.0:
-    import lpips    
-    lpips_loss_f = lpips.LPIPS(net='alex').to(device)
-
 def mask_filter_threshold_f(mask,threshold):
     mask_clone = mask.clone()
     mask_clone[mask_clone >= threshold] = 1
@@ -302,26 +295,20 @@ def compute_loss(fake_masks, gt_masks, gt_varmap, warpped, origin):
     loss_dict["mask_loss"] = mask_loss.item()
 
     # mask_regression_loss 
+    mask_regression_loss = l1_loss_f(fake_masks, gt_masks)
     if args.mask_regression_weight != 0.0:
-        mask_regression_loss = l1_loss_f(fake_masks, gt_masks)
         g_loss += args.mask_regression_weight * mask_regression_loss
         loss_dict["mask_regression_loss"] = mask_regression_loss.item()
 
     # matt_loss
+    matt_loss = l1_loss_f(mask_img_f(fake_masks_sigmoid,warpped), mask_img_f(fake_masks_sigmoid,origin)).mean()
     if args.matt_weight != 0.0:
-        matt_loss = l1_loss_f(mask_img_f(fake_masks_sigmoid,warpped), mask_img_f(fake_masks_sigmoid,origin)).mean()
         g_loss += args.matt_weight * matt_loss 
         loss_dict["matt_loss"] = matt_loss.item()
 
-    # matt_lpips_loss
-    if args.matt_lpips_weight != 0.0:
-        matt_lpips_loss = lpips_loss_f(mask_img_f(fake_masks_sigmoid,warpped), mask_img_f(fake_masks_sigmoid,origin)).mean()
-        g_loss += args.matt_lpips_weight * matt_lpips_loss 
-        loss_dict["matt_lpips_loss"] = matt_lpips_loss.item()
-
     # regularzation
+    regularzation_term_loss = regularzation_term_f(fake_masks_sigmoid)
     if args.regularzation_weight != 0.0:
-        regularzation_term_loss = regularzation_term_f(fake_masks_sigmoid)
         g_loss += args.regularzation_weight * regularzation_term_loss 
         loss_dict["regularzation_term_loss"] = regularzation_term_loss.item()
         

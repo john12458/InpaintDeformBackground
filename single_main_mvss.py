@@ -2,12 +2,12 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 wandb_prefix_name = "warp_mask_SINGLE"
 freeze_encoder = False
-know_args = ['--note',"cosine_scheduler",
-            "--matt_lpips_weight","0.0",
-            #  "--lpips_threshold", "2e-2",
+know_args = ['--note',"",
+            "--backbone","resnet50",
+             "--lpips_threshold", "2e-2",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/fashionLandmarkDetectionBenchmark/",
@@ -18,10 +18,10 @@ know_args = ['--note',"cosine_scheduler",
             # '--maskloss_type',"cross_entropy","--classfication_mask_threshold","0.1",
             '--maskloss_type',"dice_loss","--classfication_mask_threshold","0.1",
             # "--regularzation_weight","0.0",
-            '--lr', "0.0002",
+            '--lr', "0.00002",
             # '--lr', "0.0002",
             # '--maskloss_type','balancel1_sigmoid',"--mask_weight","1",
-            "--matt_weight","100.0","--mask_regression_weight","0.0","--regularzation_weight","0.05",
+            # "--matt_weight","100.0","--mask_regression_weight","0.0","--regularzation_weight","0.05",
             # "--matt_weight","0.0","--mask_regression_weight","0.0","--regularzation_weight","0.0",
             '--mask_type', "mix_tri_tps","--mask_threshold", "0.9",
             # '--mask_type', "tps_dgrid_p16","--mask_threshold", "0.9",
@@ -59,7 +59,7 @@ know_args = ['--note',"cosine_scheduler",
              '--use_resize_crop',
              '--mask_inverse',
              '--no_sigmoid',
-            #  '--use_bayar',
+             '--use_bayar',
             #  "--in_out_area_split",
              "--wandb"
             ]
@@ -77,9 +77,8 @@ device = "cuda"
 weight_cliping_limit = 0.01
 
 # assert args.D_iter > args.G_iter,print("WGAN Need D_iter > G_iter") # wgan parameters
-from cosine_scheduler import CosineAnnealingWarmupRestarts
 import torchvision.transforms as transforms
-from test import test_one
+from test import test_one_mvss
 from losses.bl1_loss import BalancedL1Loss
 from metric import BinaryMetrics 
 from losses.poly_loss import PolyBCELoss 
@@ -102,10 +101,9 @@ from loss_utils import (
 from warp_dataset import WarppedDataset
 from sklearn.model_selection import train_test_split
 import timm
-from models.generators.mask_estimator3 import MaskEstimator
+from models.mvssnet import get_mvss
 from natsort import natsorted
 import matplotlib.pyplot as plt
-
 
 seed_everything(seed)
 args = get_args(know_args)
@@ -235,7 +233,7 @@ print("num data per valid:",val_batch_num* args.batch_size)
 
 
 """ Model """
-G = MaskEstimator(image_size = image_size, backbone = args.backbone, use_attention= args.use_attention, use_hieratical=args.use_hieratical, no_sigmoid = args.no_sigmoid, use_bayar = args.use_bayar)
+G = get_mvss(sobel=True, n_input=3, constrain=True)
 G = G.to(device)
 # load model if args.ckpt_path
 if args.ckpt_path != '':
@@ -248,15 +246,9 @@ if freeze_encoder:
     for param in G.encoder.parameters():
         param.requires_grad = False
 optimizer_G = torch.optim.Adam(filter(lambda p: p.requires_grad, G.parameters()), lr=args.lr,betas=(0.5,0.99))
-scheduler = CosineAnnealingWarmupRestarts(optimizer_G, first_cycle_steps=2500, cycle_mult=1.0, max_lr=args.lr, min_lr=args.lr*0.1, warmup_steps=500, gamma=1.0) 
 
 """ Loss function """
 l1_loss_f = torch.nn.L1Loss()
-
-lpips_loss_f = None
-if args.matt_lpips_weight != 0.0:
-    import lpips    
-    lpips_loss_f = lpips.LPIPS(net='alex').to(device)
 
 def mask_filter_threshold_f(mask,threshold):
     mask_clone = mask.clone()
@@ -268,68 +260,31 @@ mask_loss_f = None
 regularzation_term_f = lambda pred: torch.mean(
                         torch.log(0.1 + pred.view(pred.size(0), -1)) +
                         torch.log(0.1 + 1. - pred.view(pred.size(0), -1)) - -2.20727, dim=-1).mean()
-if args.maskloss_type == "balancel1":
-    balanced_l1_loss = BalancedL1Loss()
-    mask_loss_f = lambda pred,gt,var : balanced_l1_loss(pred,gt)
-elif args.maskloss_type == "balancel1_sigmoid":
-    balanced_l1_loss = BalancedL1Loss()
-    mask_loss_f = lambda pred,gt,var : balanced_l1_loss(torch.sigmoid(pred),gt)
-elif args.maskloss_type == "l1":
-    mask_loss_f = lambda pred,gt,var : l1_loss_f(pred,gt)
-elif args.maskloss_type == "cross_entropy":
-    bce_loss_f = torch.nn.BCELoss()
-    mask_loss_f = lambda pred,gt,var: bce_loss_f(torch.sigmoid(pred), mask_filter_threshold_f(gt,args.classfication_mask_threshold))
-elif args.maskloss_type == "dice_loss":
+if args.maskloss_type == "dice_loss":
     from losses.SegLoss.losses_pytorch.dice_loss import SoftDiceLoss
     dice_loss_f = SoftDiceLoss()
-    mask_loss_f = lambda pred,gt,var: 1 + dice_loss_f(torch.sigmoid(pred), mask_filter_threshold_f(gt,args.classfication_mask_threshold))
-elif args.maskloss_type == "poly_bce_loss":
-    from losses.poly_loss import PolyBCELoss
-    poly_bce_loss_f = PolyBCELoss()
-    mask_loss_f = lambda pred,gt,var: poly_bce_loss_f(torch.sigmoid(pred), mask_filter_threshold_f(gt,args.classfication_mask_threshold))
+    mask_loss_f = lambda pred,gt: 1 + dice_loss_f(torch.sigmoid(pred), mask_filter_threshold_f(gt,args.classfication_mask_threshold))
+elif args.maskloss_type == "balancel1_sigmoid":
+    balanced_l1_loss = BalancedL1Loss()
+    mask_loss_f = lambda pred,gt: balanced_l1_loss(torch.sigmoid(pred),gt)
 else:
     raise NotImplementedError(f"maskloss_type {args.mask_type} not implemented!")
 
-def compute_loss(fake_masks, gt_masks, gt_varmap, warpped, origin):
+def compute_loss(edge, fake_masks, gt_masks, gt_varmap, warpped, origin):
     loss_dict = {}
     if args.no_sigmoid:
         fake_masks_sigmoid = torch.sigmoid(fake_masks)
     else:
         fake_masks_sigmoid = fake_masks
-    # mask_loss 
-    mask_loss = mask_loss_f(fake_masks, gt_masks, gt_varmap)
-    g_loss = args.mask_weight * mask_loss
-    loss_dict["mask_loss"] = mask_loss.item()
 
-    # mask_regression_loss 
-    if args.mask_regression_weight != 0.0:
-        mask_regression_loss = l1_loss_f(fake_masks, gt_masks)
-        g_loss += args.mask_regression_weight * mask_regression_loss
-        loss_dict["mask_regression_loss"] = mask_regression_loss.item()
-
-    # matt_loss
-    if args.matt_weight != 0.0:
-        matt_loss = l1_loss_f(mask_img_f(fake_masks_sigmoid,warpped), mask_img_f(fake_masks_sigmoid,origin)).mean()
-        g_loss += args.matt_weight * matt_loss 
-        loss_dict["matt_loss"] = matt_loss.item()
-
-    # matt_lpips_loss
-    if args.matt_lpips_weight != 0.0:
-        matt_lpips_loss = lpips_loss_f(mask_img_f(fake_masks_sigmoid,warpped), mask_img_f(fake_masks_sigmoid,origin)).mean()
-        g_loss += args.matt_lpips_weight * matt_lpips_loss 
-        loss_dict["matt_lpips_loss"] = matt_lpips_loss.item()
-
-    # regularzation
-    if args.regularzation_weight != 0.0:
-        regularzation_term_loss = regularzation_term_f(fake_masks_sigmoid)
-        g_loss += args.regularzation_weight * regularzation_term_loss 
-        loss_dict["regularzation_term_loss"] = regularzation_term_loss.item()
-        
-    # matt_reverse_loss
-    # matt_reverse_loss = - l1_loss_f(mask_img_reverse_f(fake_masks_sigmoid,warpped), mask_img_reverse_f(fake_masks_sigmoid,origin)).mean()
-    # if args.regularzation_weight != 0.0:
-    #     g_loss += args.matt_weight * matt_reverse_loss
-    #     loss_dict["matt_reverse_loss"]= matt_reverse_loss.item(),
+    pixel_scale_loss = mask_loss_f(fake_masks, gt_masks)
+    g_loss = 0.16 * pixel_scale_loss
+    loss_dict["pixel_scale_loss"] = pixel_scale_loss.item()
+    
+    gt_masks_down4 = torch.nn.functional.interpolate(gt_masks, scale_factor=0.25)
+    edge_loss = mask_loss_f(edge,gt_masks_down4)
+    g_loss += 0.8 * edge_loss
+    loss_dict["edge_loss"] = edge_loss.item()
 
     loss_dict["g_loss"] = g_loss.item()
 
@@ -375,8 +330,8 @@ with tqdm(total= total_steps) as pgbars:
                 warpped[sample_idxs] = origin[sample_idxs].clone()
                 gt_masks[sample_idxs] = torch.zeros_like(gt_masks[sample_idxs]) if args.mask_inverse else torch.ones_like(gt_masks[sample_idxs]) 
             
-            fake_masks = G(warpped)
-            g_loss,loss_dict = compute_loss(fake_masks, gt_masks, gt_varmap, warpped, origin)
+            edge, fake_masks = G(warpped)
+            g_loss,loss_dict = compute_loss(edge,fake_masks, gt_masks, gt_varmap, warpped, origin)
             g_loss.backward()
             optimizer_G.step()
 
@@ -484,8 +439,8 @@ with tqdm(total= total_steps) as pgbars:
                         gt_masks[sample_idxs] = torch.zeros_like(gt_masks[sample_idxs]) if args.mask_inverse else torch.ones_like(gt_masks[sample_idxs]) 
                         
                         
-                        fake_masks = G(warpped)
-                        g_loss,loss_dict = compute_loss(fake_masks, gt_masks, gt_varmap, warpped, origin)
+                        edge, fake_masks = G(warpped)
+                        g_loss,loss_dict = compute_loss(edge,fake_masks, gt_masks, gt_varmap, warpped, origin)
                         for k,v in loss_dict.items():
                             if k in val_loss_dict:
                                 val_loss_dict[k].append(loss_dict[k])
@@ -624,7 +579,7 @@ with tqdm(total= total_steps) as pgbars:
                         test_dir = '/workspace/inpaint_mask/data/test/warpped/'
                         test_files = ['05.jpeg','03.jpeg']
                         for test_name in test_files:
-                            fake_mask, fake_masks_on_img  = test_one(f'{test_dir}/{test_name}',G,image_size, mask_img_f, device)
+                            fake_mask, fake_masks_on_img  = test_one_mvss(f'{test_dir}/{test_name}',G,image_size, mask_img_f, device)
                             
                             test_dict.update({
                                 f'fakeMask on {test_name}':{
@@ -665,10 +620,9 @@ with tqdm(total= total_steps) as pgbars:
 
                        
                 
-            log_dict['lr'] =  scheduler.get_lr()[0]
+                    
             pgbars.set_postfix(log_dict)
             if args.wandb:
                 wandb.log(log_dict,step=step)
             step = step + 1
             pgbars.update(1)
-            scheduler.step()
