@@ -2,11 +2,12 @@
 # coding: utf-8
 import os
 """ Setting """
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 wandb_prefix_name = "warp_mask_SINGLE"
 freeze_encoder = False
-know_args = ['--note',"",
-             "--lpips_threshold", "2e-2",
+know_args = ['--note',"single_main_5_revice",
+            "--backbone","convnext_tiny",
+            #  "--lpips_threshold", "2e-2",
              "--log_dir",f"/workspace/inpaint_mask/log/{wandb_prefix_name}/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/celeba/",
             #  "--data_dir","/workspace/inpaint_mask/data/warpData/fashionLandmarkDetectionBenchmark/",
@@ -14,8 +15,8 @@ know_args = ['--note',"",
             #  "--data_dir", "/workspace/inpaint_mask/data/warpData/Celeb-reID-light/train/",
             # "--ckpt_path",'/workspace/inpaint_mask/log/warp_mask_SINGLE/2e9ztqt2/ckpts/ckpt_14001_2.pt',
             # '--maskloss_type',"poly_bce_loss","--classfication_mask_threshold","0.1",
-            # '--maskloss_type',"cross_entropy","--classfication_mask_threshold","0.1",
-            '--maskloss_type',"dice_loss","--classfication_mask_threshold","0.1",
+            '--maskloss_type',"cross_entropy","--classfication_mask_threshold","0.1",
+            # '--maskloss_type',"dice_loss","--classfication_mask_threshold","0.1",
             # "--regularzation_weight","0.0",
             # '--lr', "0.00002",
             '--lr', "0.0002",
@@ -58,7 +59,7 @@ know_args = ['--note',"",
              '--use_resize_crop',
              '--mask_inverse',
              '--no_sigmoid',
-             '--use_bayar',
+            #  '--use_bayar',
             #  "--in_out_area_split",
              "--wandb"
             ]
@@ -385,7 +386,8 @@ with tqdm(total= total_steps) as pgbars:
                         "dice":dice, 
                         "precision":precision, 
                         "specificity":specificity,
-                        "recall":recall
+                        "recall":recall,
+                        "F1_score":2 * precision * recall / (precision + recall)
                     }
                     
                 },
@@ -501,7 +503,8 @@ with tqdm(total= total_steps) as pgbars:
                             "dice":dice, 
                             "precision":precision, 
                             "specificity":specificity,
-                            "recall":recall
+                            "recall":recall,
+                            "F1_score":2 * precision * recall / (precision + recall)
                         }
                     }
                     
@@ -601,6 +604,7 @@ with tqdm(total= total_steps) as pgbars:
                         if args.wandb:
                             wandb.run.summary["min_g_loss_step"] = step
                             wandb.run.summary["min_g_loss_recall"] = recall
+                            wandb.run.summary["min_g_loss_F1"] = 2 * precision * recall / (precision + recall)
                         """ Train """
                         train_img_path = f"{sample_dir}/train_{step}_{epoch}.jpg"
                         visualize(visual_train_dict,train_img_path)

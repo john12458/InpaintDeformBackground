@@ -330,10 +330,10 @@ class MaskEstimator(nn.Module):
         print("backbone", backbone)
 
         self.encoder = self._encoder_selector()
-        self.noise_extractor = ResNet50(n_input=3, pretrained=True)
-
+        # self.noise_extractor = ResNet50(n_input=3, pretrained=True) # 2048
+        self.noise_extractor = timm.create_model("convnext_tiny", pretrained=True)  # 768
         self.constrain_conv = BayarConv2d(in_channels=1, out_channels=3, padding=2)
-        self.head = _DAHead(1024+2048,1)
+        self.head = _DAHead(768+768,1)
 
     def _encoder_selector(self):
         return timm.create_model(self.backbone_name, pretrained=True) 
@@ -347,7 +347,7 @@ class MaskEstimator(nn.Module):
             # print("feat",feat.shape)
         return feat, feature_list
 
-    def fuse_stage(self,cat_x):
+    def _fuse(self,cat_x):
         x = self.head(cat_x)
         x0 = F.interpolate(x[0], self.image_size, mode='bilinear', align_corners=True) 
         return x0
@@ -358,18 +358,25 @@ class MaskEstimator(nn.Module):
         assert x.shape == (batch_size,3,self.image_size[0],self.image_size[1])
         # encoder
         latent_code, feature_list = self._encoder_FPN(x)
+
+        # print("latent_code",latent_code.shape)
         # reverse_feature_list = feature_list[::-1][1:]
-        latent_code = F.interpolate(latent_code, scale_factor=2, mode='bilinear', align_corners=True)   # 1024,16,16
+        # latent_code = F.interpolate(latent_code, scale_factor=2, mode='bilinear', align_corners=True)   # 1024,16,16
 
         # noise branch
         x2 = rgb2gray(x)
         x2 = self.constrain_conv(x2)
-        constrain_features, _ = self.noise_extractor.base_forward(x2)
-        constrain_feature = constrain_features[-1] # 2048,16,16
+        # constrain_features, _ = self.noise_extractor.base_forward(x2)
+        # constrain_feature = constrain_features[-1] # 2048,16,16 renet50
+        constrain_feature = self.noise_extractor.forward_features(x2)
+        # print("constrain_feature",constrain_feature.shape)
+        
         
         # Fuse
         cat_x = torch.cat([latent_code, constrain_feature], dim=1)
-        mask = self.fuse_stage(cat_x)
+        cat_x  = F.interpolate(cat_x , scale_factor=2, mode='bilinear', align_corners=True)   # convnext 8,8 -> 16,16 , renet not need
+
+        mask = self._fuse(cat_x)
         if not self.no_sigmoid:
             mask = torch.sigmoid(mask)
 
