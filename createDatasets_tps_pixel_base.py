@@ -190,7 +190,7 @@ class TPSWarp:
         
         mask = wdgrid2mask(warpped_delta_grid,use_neighbor=self.use_neighbor,use_normlize=self.use_normlize)
         # print("warpped_delta_grid",warpped_delta_grid.shape, warpped_delta_grid.max(), warpped_delta_grid.min())
-        return warpped_img, mesh_pts, mesh_tran_pts, mask, warpped_delta_grid
+        return warpped_img, mesh_pts, mesh_tran_pts, mask, warpped_delta_grid, delta_grid
         # return warpped_img, mesh_pts, mesh_tran_pts, mask, warpped_delta_grid
 
         # return warpped_img, src_pts, target_pts, warpped_delta_grid, neighbor_warpped_delta_grid, mapx, mapy,identity_warp
@@ -253,6 +253,9 @@ class CelebADataset(torch.utils.data.Dataset):
         
         self.warp_dgrid_dir = f"{savePath}/warp_dgrid/"
         check_create_dir(self.warp_dgrid_dir)
+
+        self.dgrid_dir = f"{savePath}/dgrid"
+        check_create_dir(self.dgrid_dir)
         
         
         self._test_for_open_img()
@@ -296,7 +299,7 @@ class CelebADataset(torch.utils.data.Dataset):
         
             
         if self.return_mesh:
-            warpped_img, mesh_no_last_row, mesh_trans_no_last_row,mask, warpped_delta_grid  = self.warp_f(img_pillow)
+            warpped_img, mesh_no_last_row, mesh_trans_no_last_row,mask, warpped_delta_grid, delta_grid  = self.warp_f(img_pillow)
            
             
             
@@ -323,11 +326,15 @@ class CelebADataset(torch.utils.data.Dataset):
                 # print("padded_mask",padded_mask.shape,padded_mask.min(),padded_mask.max())
                 np.save(mask_path,mask)
                 
-                """ dgrid """
+                """warp dgrid """
                 warpped_delta_grid_path = f"{self.warp_dgrid_dir}/{self.image_names[idx].split('.')[0]}"
                 # warpped_delta_grid = np.int32(warpped_delta_grid)
                 # print("int warpped_delta_grid",warpped_delta_grid.max(),warpped_delta_grid.min(),warpped_delta_grid.shape)
                 np.save( warpped_delta_grid_path, warpped_delta_grid)
+                """ dgrid """
+                delta_grid_path = f"{self.dgrid_dir}/{self.image_names[idx].split('.')[0]}"
+                np.save( delta_grid_path, delta_grid)
+
                 
 
                 # """ mesh """
@@ -340,6 +347,7 @@ class CelebADataset(torch.utils.data.Dataset):
                 print("warpped:", warpped_path)
                 print("mask_path", mask_path)
                 print("warpped_delta_grid_path:",warpped_delta_grid_path)
+                print("delta_grid_path:",delta_grid_path)
                 # print("mesh_path", mesh_path)
                 print("---")
             
@@ -361,12 +369,12 @@ class CelebADataset(torch.utils.data.Dataset):
 # %%
 image_size = (512,512)
 args = type('', (), {})()
-args.mask_type = "tps_dgrid_p16"
+args.mask_type = "tps_dgrid_p16_v2_pixel_base"
 args.varmap_type = "notuse"
 args.varmap_threshold = -1
 
-src_data_dir = "/workspace/inpaint_mask/data/fashionLandmarkDetectionBenchmark/"
-target_data_dir = f"/workspace/inpaint_mask/data/warpData/fashionLandmarkDetectionBenchmark/{args.mask_type}/"
+src_data_dir = "/workspace/inpaint_mask/data/warpData/CIHP/Training/tps_dgrid_p16_v5_pixel_base/origin/"
+target_data_dir = f"/workspace/inpaint_mask/data/warpData/CIHP/Training/{args.mask_type}/"
 
 # src_data_dir = "/workspace/inpaint_mask/data/fashionLandmarkDetectionBenchmark/"
 # target_data_dir = f"/workspace/inpaint_mask/data/warpData/fashionLandmarkDetectionBenchmark/{args.mask_type}/"
@@ -405,8 +413,8 @@ class RandTPS():
 # In[28]:
 
 
-batch_size = 12
-num_workers= 12
+batch_size = 8
+num_workers= 8
 warp_f = RandTPS()
 dataset = CelebADataset(warp_f,
                         root_dir=src_data_dir,
@@ -421,7 +429,7 @@ data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size,
 
 # In[2]:
 def sample_one_to_check():
-    sample_id = "img_00000001"
+    sample_id = "0000006"
 
     origin = Image.open(f"{target_data_dir}/origin/{sample_id}.jpg")
     warpped = Image.open(f"{target_data_dir}/warpped/{sample_id}.jpg")
